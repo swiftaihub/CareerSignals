@@ -15,6 +15,7 @@ The sample candidate profile emphasizes Python, SQL, Spark/PySpark, dbt, Databri
 - YAML-driven job categories, filters, candidate profile, ranking weights, and skill aliases.
 - Mock connector that runs without paid API keys.
 - Real-source connectors for Adzuna, SerpApi Google Jobs, Greenhouse, Lever, and USAJOBS.
+- Configurable posted-date freshness filter; default keeps only jobs posted within the last 24 hours.
 - Timestamped raw and processed JSON snapshots for every pipeline run.
 - Normalized job schema with stable job IDs.
 - Deduplication by job ID, post link, and fuzzy company/title/location matching.
@@ -46,14 +47,15 @@ The processing flow is:
 
 1. Load and validate YAML configs.
 2. Fetch jobs from one or more configured connectors.
-3. Save a timestamped raw JSON snapshot.
-4. Normalize raw postings into the shared schema.
-5. Deduplicate jobs.
-6. Parse salary and extract skills.
-7. Classify industry, seniority, work arrangement, and visa signal.
-8. Score jobs against the candidate profile.
-9. Save a timestamped processed JSON snapshot.
-10. Export the Excel workbook.
+3. Normalize raw postings into the shared schema.
+4. Keep only postings inside the configured freshness window.
+5. Save a timestamped raw JSON snapshot for retained postings.
+6. Deduplicate jobs.
+7. Parse salary and extract skills.
+8. Classify industry, seniority, work arrangement, and visa signal.
+9. Score jobs against the candidate profile.
+10. Save a timestamped processed JSON snapshot.
+11. Export the Excel workbook.
 
 ## Setup
 
@@ -95,6 +97,8 @@ Expected terminal summary:
 
 ```text
 CareerSignal pipeline completed.
+Fetched jobs: 125
+Freshness filtered out: 32
 Total jobs processed: 15
 Deduplicated jobs: 15
 Top matches: ...
@@ -137,6 +141,17 @@ ranking_weights:
   work_arrangement_match: 0.10
   visa_signal_match: 0.10
 ```
+
+Freshness filtering is also configurable in `config/jobs_config.yml`:
+
+```yaml
+freshness_filter:
+  enabled: true
+  max_post_age_hours: 24
+  include_unknown_dates: false
+```
+
+With the default settings, each refresh keeps only jobs posted within the last 24 hours. Jobs with unknown or unparseable posted dates are excluded unless `include_unknown_dates` is set to `true`. For sources that expose only a date without a timestamp, CareerSignal treats postings on the cutoff date as eligible.
 
 ## Real Data Ingestion
 

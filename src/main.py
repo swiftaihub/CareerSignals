@@ -27,6 +27,7 @@ from src.connectors.serpapi_connector import SerpApiConnector
 from src.connectors.usajobs_connector import USAJobsConnector
 from src.exporters.excel_exporter import ExcelExporter
 from src.ingestion.persistence import write_json_snapshot
+from src.processing.date_filter import freshness_decision
 from src.processing.deduplicate import deduplicate_jobs
 from src.processing.industry_classifier import classify_industry
 from src.processing.normalize import normalize_raw_job
@@ -122,6 +123,49 @@ def _normalize_jobs(raw_records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return normalized_jobs
 
 
+def _apply_freshness_filter(
+    raw_records: list[dict[str, Any]],
+    normalized_jobs: list[dict[str, Any]],
+    configs: ConfigBundle,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, int]]:
+    freshness_filter = configs.jobs.freshness_filter
+    stats = {
+        "input_jobs": len(normalized_jobs),
+        "kept_jobs": 0,
+        "older_than_max_age": 0,
+        "unknown_date_excluded": 0,
+        "unknown_date_included": 0,
+        "disabled": 0,
+    }
+
+    if not freshness_filter.enabled:
+        stats["kept_jobs"] = len(normalized_jobs)
+        stats["disabled"] = len(normalized_jobs)
+        return raw_records, normalized_jobs, stats
+
+    kept_raw_records: list[dict[str, Any]] = []
+    kept_normalized_jobs: list[dict[str, Any]] = []
+
+    for raw_record, normalized_job in zip(raw_records, normalized_jobs):
+        decision = freshness_decision(normalized_job, freshness_filter)
+        stats[decision.reason] = stats.get(decision.reason, 0) + 1
+        if decision.keep:
+            kept_raw_records.append(raw_record)
+            kept_normalized_jobs.append(normalized_job)
+
+    stats["kept_jobs"] = len(kept_normalized_jobs)
+    filtered_out = stats["input_jobs"] - stats["kept_jobs"]
+    if filtered_out:
+        LOGGER.info(
+            "Freshness filter kept %s of %s jobs posted within %s hours.",
+            stats["kept_jobs"],
+            stats["input_jobs"],
+            freshness_filter.max_post_age_hours,
+        )
+
+    return kept_raw_records, kept_normalized_jobs, stats
+
+
 def _enrich_and_score_jobs(
     jobs: list[dict[str, Any]],
     configs: ConfigBundle,
@@ -211,20 +255,32 @@ def run_pipeline(project_root: str | Path = ".") -> dict[str, Any]:
         connectors = [build_connector("mock", root, configs)]
         raw_records = _collect_jobs(connectors, configs.jobs.job_categories)
 
+    fetched_raw_record_count = len(raw_records)
+    normalized_jobs = _normalize_jobs(raw_records)
+    raw_records, normalized_jobs, freshness_stats = _apply_freshness_filter(
+        raw_records,
+        normalized_jobs,
+        configs,
+    )
+
     raw_snapshot_path = None
     if _truthy_env("WRITE_DATA_SNAPSHOTS", default=True):
         raw_snapshot_path = write_json_snapshot(
             {
                 "metadata": {
                     "sources": [connector.source_name for connector in connectors],
+                    "fetched_raw_record_count": fetched_raw_record_count,
                     "raw_record_count": len(raw_records),
+                    "freshness_filter": configs.jobs.freshness_filter.model_dump()
+                    if hasattr(configs.jobs.freshness_filter, "model_dump")
+                    else configs.jobs.freshness_filter.dict(),
+                    "freshness_stats": freshness_stats,
                 },
                 "records": _snapshot_ready_raw_records(raw_records),
             },
             root / "data" / "raw" / "raw_jobs.json",
         )
 
-    normalized_jobs = _normalize_jobs(raw_records)
     deduped_jobs = deduplicate_jobs(normalized_jobs)
     processed_jobs = _enrich_and_score_jobs(deduped_jobs, configs)
 
@@ -235,6 +291,10 @@ def run_pipeline(project_root: str | Path = ".") -> dict[str, Any]:
                 "metadata": {
                     "sources": [connector.source_name for connector in connectors],
                     "processed_record_count": len(processed_jobs),
+                    "freshness_filter": configs.jobs.freshness_filter.model_dump()
+                    if hasattr(configs.jobs.freshness_filter, "model_dump")
+                    else configs.jobs.freshness_filter.dict(),
+                    "freshness_stats": freshness_stats,
                 },
                 "records": processed_jobs,
             },
@@ -259,6 +319,9 @@ def run_pipeline(project_root: str | Path = ".") -> dict[str, Any]:
 
     return {
         "raw_jobs": len(raw_records),
+        "fetched_raw_jobs": fetched_raw_record_count,
+        "freshness_filtered_out": freshness_stats["input_jobs"] - freshness_stats["kept_jobs"],
+        "freshness_stats": freshness_stats,
         "total_jobs_processed": len(normalized_jobs),
         "deduplicated_jobs": len(deduped_jobs),
         "top_matches": len(top_matches),
@@ -275,6 +338,8 @@ def main() -> None:
     summary = run_pipeline(project_root)
 
     print("CareerSignal pipeline completed.")
+    print(f"Fetched jobs: {summary['fetched_raw_jobs']}")
+    print(f"Freshness filtered out: {summary['freshness_filtered_out']}")
     print(f"Total jobs processed: {summary['total_jobs_processed']}")
     print(f"Deduplicated jobs: {summary['deduplicated_jobs']}")
     print(f"Top matches: {summary['top_matches']}")

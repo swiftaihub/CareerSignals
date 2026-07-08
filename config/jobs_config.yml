@@ -11,6 +11,11 @@ global_filters:
   employment_type:
     - "full-time"
 
+freshness_filter:
+  enabled: true
+  max_post_age_hours: 24
+  include_unknown_dates: false
+
 job_categories:
   - category_name: "Data Scientist - Tech"
     search_titles:

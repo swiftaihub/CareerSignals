@@ -11,4 +11,6 @@ def test_load_configs_reads_expected_categories() -> None:
     assert "Data Scientist - Tech" in category_names
     assert "Credit Risk Analyst" in category_names
     assert configs.jobs.output.excel_file == "outputs/job_search_tracker.xlsx"
+    assert configs.jobs.freshness_filter.enabled is True
+    assert configs.jobs.freshness_filter.max_post_age_hours == 24
     assert "Python" in configs.candidate_profile.candidate.all_skills()

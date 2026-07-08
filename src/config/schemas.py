@@ -15,6 +15,12 @@ class GlobalFilters(BaseModel):
     employment_type: list[str] = Field(default_factory=list)
 
 
+class FreshnessFilter(BaseModel):
+    enabled: bool = True
+    max_post_age_hours: int = Field(default=24, gt=0)
+    include_unknown_dates: bool = False
+
+
 class JobCategoryConfig(BaseModel):
     category_name: str
     search_titles: list[str] = Field(default_factory=list)
@@ -49,6 +55,7 @@ class OutputConfig(BaseModel):
 
 class JobsConfig(BaseModel):
     global_filters: GlobalFilters
+    freshness_filter: FreshnessFilter = Field(default_factory=FreshnessFilter)
     job_categories: list[JobCategoryConfig]
     ranking_weights: RankingWeights
     output: OutputConfig
