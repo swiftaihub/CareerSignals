@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# output excel files
+outputs/*.xlsx
+
+# local json data files
+*.json

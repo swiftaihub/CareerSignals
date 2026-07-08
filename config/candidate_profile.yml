@@ -1,0 +1,91 @@
+candidate:
+  target_titles:
+    - "Data Scientist"
+    - "Analytics Engineer"
+    - "BI Analyst"
+    - "Risk Analyst"
+    - "Credit Risk Analyst"
+    - "Fraud Strategy Analyst"
+    - "Healthcare Data Scientist"
+
+  target_industries:
+    - "technology"
+    - "healthcare"
+    - "health tech"
+    - "banking"
+    - "fintech"
+    - "consumer lending"
+
+  required_preferences:
+    work_arrangement:
+      - "remote"
+      - "hybrid"
+
+  salary_expectation:
+    min_base_salary: 100000
+    preferred_base_salary: 200000
+
+  visa_keywords:
+    positive:
+      - "visa sponsorship"
+      - "H-1B"
+      - "H1B"
+      - "sponsor"
+      - "employment visa"
+    negative:
+      - "unable to sponsor"
+      - "no sponsorship"
+      - "must be authorized to work"
+      - "without sponsorship"
+      - "US citizen"
+      - "green card required"
+
+  skills:
+    programming:
+      - "Python"
+      - "SQL"
+      - "R"
+      - "REST APIs"
+      - "YAML"
+      - "Git"
+      - "Docker"
+
+    data_engineering:
+      - "Spark"
+      - "PySpark"
+      - "dbt"
+      - "Databricks"
+      - "Delta Lake"
+      - "AWS"
+      - "Azure"
+      - "Redshift"
+      - "Snowflake"
+      - "Terraform"
+
+    bi:
+      - "Tableau"
+      - "Power BI"
+      - "DAX"
+      - "KPI"
+      - "dashboard"
+      - "metric layer"
+      - "reporting"
+
+    analytics:
+      - "customer segmentation"
+      - "product analytics"
+      - "sentiment scoring"
+      - "healthcare analytics"
+      - "credit risk"
+      - "fraud"
+      - "lending"
+      - "risk analytics"
+
+    llm:
+      - "OpenAI"
+      - "LLM"
+      - "prompt engineering"
+      - "RAG"
+      - "NLP"
+      - "classification"
+      - "few-shot"
