@@ -1,0 +1,20 @@
+version: 2
+
+sources:
+  - name: raw
+    schema: raw
+    tables:
+      - name: job_posts_raw
+      - name: ingestion_runs
+      - name: connector_errors
+
+  - name: staging
+    schema: staging
+    tables:
+      - name: python_jobs_processed
+      - name: python_candidate_skills
+
+  - name: app
+    schema: app
+    tables:
+      - name: job_application_status

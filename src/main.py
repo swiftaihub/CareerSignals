@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import sys
 from typing import Any
+from uuid import uuid4
 
 if __package__ is None or __package__ == "":
     sys.path.append(str(Path(__file__).resolve().parents[1]))
@@ -38,6 +39,17 @@ from src.processing.visa_signal import detect_visa_signal
 from src.processing.work_arrangement import detect_work_arrangement
 from src.utils.file_outputs import timestamped_output_path
 from src.utils.logging import configure_logging
+from packages.careersignal_core.dbt.runner import run_dbt, test_dbt
+from packages.careersignal_core.settings import (
+    bool_env,
+    data_mode,
+    dbt_profiles_dir,
+    dbt_project_dir,
+    excel_path,
+)
+from packages.careersignal_core.storage.ingestion import MotherDuckIngestionWriter
+from packages.careersignal_core.storage.motherduck import MotherDuckService
+from packages.careersignal_core.storage.schema import init_motherduck_schema
 
 LOGGER = logging.getLogger(__name__)
 
@@ -91,17 +103,27 @@ def build_connectors(
 def _collect_jobs(
     connectors: list[BaseJobConnector],
     categories: list[JobCategoryConfig],
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     raw_records: list[dict[str, Any]] = []
+    connector_errors: list[dict[str, Any]] = []
     for connector in connectors:
         for category in categories:
             try:
                 fetched = connector.fetch_jobs(category)
-            except Exception:
+            except Exception as exc:
                 LOGGER.exception(
                     "Connector %s failed for category %s.",
                     connector.source_name,
                     category.category_name,
+                )
+                connector_errors.append(
+                    {
+                        "source": connector.source_name,
+                        "category_name": category.category_name,
+                        "query_title": ", ".join(category.search_titles),
+                        "error_message": str(exc),
+                        "error_type": type(exc).__name__,
+                    }
                 )
                 continue
             raw_records.extend(
@@ -112,7 +134,7 @@ def _collect_jobs(
                 }
                 for record in fetched
             )
-    return raw_records
+    return raw_records, connector_errors
 
 
 def _normalize_jobs(raw_records: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -238,6 +260,69 @@ def _snapshot_ready_raw_records(raw_records: list[dict[str, Any]]) -> list[dict[
     return serializable
 
 
+def _resolved_project_path(root: Path, path: Path) -> Path:
+    if path.is_absolute():
+        return path
+    root_candidate = (root / path).resolve()
+    if root_candidate.exists():
+        return root_candidate
+    api_candidate = (root / "apps" / "api" / path).resolve()
+    if api_candidate.exists():
+        return api_candidate
+    return root_candidate
+
+
+def _debug_json_enabled(current_data_mode: str) -> bool:
+    if "CAREERSIGNAL_WRITE_DEBUG_JSON" in os.environ:
+        return bool_env("CAREERSIGNAL_WRITE_DEBUG_JSON", default=False)
+    if "WRITE_DATA_SNAPSHOTS" in os.environ:
+        return _truthy_env("WRITE_DATA_SNAPSHOTS", default=False)
+    return current_data_mode == "local"
+
+
+def _run_dbt_if_enabled(root: Path) -> bool:
+    project_dir = _resolved_project_path(root, dbt_project_dir())
+    profiles_dir = _resolved_project_path(root, dbt_profiles_dir())
+    ran_dbt = False
+    if bool_env("CAREERSIGNAL_RUN_DBT", default=True):
+        LOGGER.info("Running dbt models.")
+        run_dbt(project_dir, profiles_dir)
+        ran_dbt = True
+    if bool_env("CAREERSIGNAL_RUN_DBT_TESTS", default=True):
+        LOGGER.info("Running dbt tests.")
+        test_dbt(project_dir, profiles_dir)
+    return ran_dbt
+
+
+def _mart_dataframes(service: MotherDuckService) -> dict[str, Any]:
+    return {
+        "All Jobs": service.query_df("select * from mart.mart_jobs_scored order by match_score desc"),
+        "Top Matches": service.query_df("select * from mart.mart_top_matches"),
+        "By Category Summary": service.query_df("select * from mart.mart_category_summary"),
+        "Skill Gap Analysis": service.query_df("select * from mart.mart_skill_gap_analysis"),
+        "Company Priority List": service.query_df("select * from mart.mart_company_priority_list"),
+    }
+
+
+def export_excel_from_current_data(project_root: str | Path = ".") -> Path:
+    """Export Excel from the current source of truth for the active data mode."""
+
+    root = Path(project_root).resolve()
+    if load_dotenv is not None:
+        load_dotenv(root / ".env")
+
+    configs = load_configs(root)
+    output_path = timestamped_output_path(_resolved_project_path(root, excel_path()))
+    exporter = ExcelExporter(configs.candidate_profile.candidate, configs.skill_taxonomy)
+
+    if data_mode() == "motherduck":
+        exporter.export_dataframes(_mart_dataframes(MotherDuckService()), output_path)
+        return output_path
+
+    summary = run_pipeline(root)
+    return Path(summary["output_path"])
+
+
 def run_pipeline(project_root: str | Path = ".") -> dict[str, Any]:
     """Run the full CareerSignal MVP pipeline."""
 
@@ -245,91 +330,155 @@ def run_pipeline(project_root: str | Path = ".") -> dict[str, Any]:
     if load_dotenv is not None:
         load_dotenv(root / ".env")
 
+    current_data_mode = data_mode()
+    run_id = uuid4().hex
     configs = load_configs(root)
     source_names = source_names_from_env()
     connectors = build_connectors(source_names, root, configs)
+    md_service = MotherDuckService() if current_data_mode == "motherduck" else None
+    md_writer = MotherDuckIngestionWriter(md_service) if md_service else None
 
-    raw_records = _collect_jobs(connectors, configs.jobs.job_categories)
-    if not raw_records and not any(connector.source_name == "mock" for connector in connectors):
-        LOGGER.warning("No jobs returned from configured sources; falling back to mock connector.")
-        connectors = [build_connector("mock", root, configs)]
-        raw_records = _collect_jobs(connectors, configs.jobs.job_categories)
+    if md_writer:
+        LOGGER.info("Initializing MotherDuck schemas.")
+        init_motherduck_schema(md_service)
+        md_writer.start_run(run_id, current_data_mode)
 
-    fetched_raw_record_count = len(raw_records)
-    normalized_jobs = _normalize_jobs(raw_records)
-    raw_records, normalized_jobs, freshness_stats = _apply_freshness_filter(
-        raw_records,
-        normalized_jobs,
-        configs,
-    )
+    output_path = timestamped_output_path(_resolved_project_path(root, excel_path()))
 
-    raw_snapshot_path = None
-    if _truthy_env("WRITE_DATA_SNAPSHOTS", default=True):
-        raw_snapshot_path = write_json_snapshot(
-            {
-                "metadata": {
-                    "sources": [connector.source_name for connector in connectors],
-                    "fetched_raw_record_count": fetched_raw_record_count,
-                    "raw_record_count": len(raw_records),
-                    "freshness_filter": configs.jobs.freshness_filter.model_dump()
-                    if hasattr(configs.jobs.freshness_filter, "model_dump")
-                    else configs.jobs.freshness_filter.dict(),
-                    "freshness_stats": freshness_stats,
-                },
-                "records": _snapshot_ready_raw_records(raw_records),
-            },
-            root / "data" / "raw" / "raw_jobs.json",
+    try:
+        raw_records, connector_errors = _collect_jobs(connectors, configs.jobs.job_categories)
+        if not raw_records and not any(connector.source_name == "mock" for connector in connectors):
+            LOGGER.warning("No jobs returned from configured sources; falling back to mock connector.")
+            connectors = [build_connector("mock", root, configs)]
+            raw_records, fallback_errors = _collect_jobs(connectors, configs.jobs.job_categories)
+            connector_errors.extend(fallback_errors)
+
+        fetched_raw_record_count = len(raw_records)
+        normalized_jobs = _normalize_jobs(raw_records)
+
+        if md_writer:
+            LOGGER.info("Writing raw connector observations to MotherDuck.")
+            md_writer.write_raw_jobs(run_id, raw_records)
+            md_writer.write_connector_errors(run_id, connector_errors)
+            md_writer.write_candidate_skills(configs.candidate_profile.candidate)
+
+        raw_records, normalized_jobs, freshness_stats = _apply_freshness_filter(
+            raw_records,
+            normalized_jobs,
+            configs,
         )
 
-    deduped_jobs = deduplicate_jobs(normalized_jobs)
-    processed_jobs = _enrich_and_score_jobs(deduped_jobs, configs)
-
-    processed_snapshot_path = None
-    if _truthy_env("WRITE_DATA_SNAPSHOTS", default=True):
-        processed_snapshot_path = write_json_snapshot(
-            {
-                "metadata": {
-                    "sources": [connector.source_name for connector in connectors],
-                    "processed_record_count": len(processed_jobs),
-                    "freshness_filter": configs.jobs.freshness_filter.model_dump()
-                    if hasattr(configs.jobs.freshness_filter, "model_dump")
-                    else configs.jobs.freshness_filter.dict(),
-                    "freshness_stats": freshness_stats,
+        raw_snapshot_path = None
+        if _debug_json_enabled(current_data_mode):
+            raw_snapshot_path = write_json_snapshot(
+                {
+                    "metadata": {
+                        "run_id": run_id,
+                        "data_mode": current_data_mode,
+                        "sources": [connector.source_name for connector in connectors],
+                        "fetched_raw_record_count": fetched_raw_record_count,
+                        "raw_record_count": len(raw_records),
+                        "freshness_filter": configs.jobs.freshness_filter.model_dump()
+                        if hasattr(configs.jobs.freshness_filter, "model_dump")
+                        else configs.jobs.freshness_filter.dict(),
+                        "freshness_stats": freshness_stats,
+                    },
+                    "records": _snapshot_ready_raw_records(raw_records),
                 },
-                "records": processed_jobs,
-            },
-            root / "data" / "processed" / "processed_jobs.json",
-        )
+                root / "data" / "raw" / "raw_jobs.json",
+            )
 
-    output_path = timestamped_output_path(root / configs.jobs.output.excel_file)
-    ExcelExporter(
-        configs.candidate_profile.candidate,
-        configs.skill_taxonomy,
-    ).export(
-        processed_jobs,
-        output_path,
-        configs.jobs.output.top_match_threshold,
-    )
+        deduped_jobs = deduplicate_jobs(normalized_jobs)
+        processed_jobs = _enrich_and_score_jobs(deduped_jobs, configs)
 
-    top_matches = [
-        job
-        for job in processed_jobs
-        if float(job.get("match_score") or 0) >= configs.jobs.output.top_match_threshold
-    ]
+        if md_writer:
+            LOGGER.info("Writing processed bridge rows to MotherDuck.")
+            md_writer.write_processed_jobs(run_id, processed_jobs)
 
-    return {
-        "raw_jobs": len(raw_records),
-        "fetched_raw_jobs": fetched_raw_record_count,
-        "freshness_filtered_out": freshness_stats["input_jobs"] - freshness_stats["kept_jobs"],
-        "freshness_stats": freshness_stats,
-        "total_jobs_processed": len(normalized_jobs),
-        "deduplicated_jobs": len(deduped_jobs),
-        "top_matches": len(top_matches),
-        "output_path": output_path,
-        "raw_snapshot_path": raw_snapshot_path,
-        "processed_snapshot_path": processed_snapshot_path,
-        "jobs": processed_jobs,
-    }
+        processed_snapshot_path = None
+        if _debug_json_enabled(current_data_mode):
+            processed_snapshot_path = write_json_snapshot(
+                {
+                    "metadata": {
+                        "run_id": run_id,
+                        "data_mode": current_data_mode,
+                        "sources": [connector.source_name for connector in connectors],
+                        "processed_record_count": len(processed_jobs),
+                        "freshness_filter": configs.jobs.freshness_filter.model_dump()
+                        if hasattr(configs.jobs.freshness_filter, "model_dump")
+                        else configs.jobs.freshness_filter.dict(),
+                        "freshness_stats": freshness_stats,
+                    },
+                    "records": processed_jobs,
+                },
+                root / "data" / "processed" / "processed_jobs.json",
+            )
+
+        if current_data_mode == "motherduck" and md_service:
+            ran_dbt = _run_dbt_if_enabled(root)
+            if ran_dbt:
+                LOGGER.info("Exporting Excel workbook from MotherDuck mart tables.")
+                ExcelExporter(
+                    configs.candidate_profile.candidate,
+                    configs.skill_taxonomy,
+                ).export_dataframes(_mart_dataframes(md_service), output_path)
+            else:
+                LOGGER.warning(
+                    "dbt execution is disabled; exporting Excel from processed Python rows."
+                )
+                ExcelExporter(
+                    configs.candidate_profile.candidate,
+                    configs.skill_taxonomy,
+                ).export(
+                    processed_jobs,
+                    output_path,
+                    configs.jobs.output.top_match_threshold,
+                )
+        else:
+            ExcelExporter(
+                configs.candidate_profile.candidate,
+                configs.skill_taxonomy,
+            ).export(
+                processed_jobs,
+                output_path,
+                configs.jobs.output.top_match_threshold,
+            )
+
+        top_matches = [
+            job
+            for job in processed_jobs
+            if float(job.get("match_score") or 0) >= configs.jobs.output.top_match_threshold
+        ]
+
+        if md_writer:
+            md_writer.complete_run(
+                run_id=run_id,
+                total_raw_jobs=fetched_raw_record_count,
+                total_processed_jobs=len(processed_jobs),
+                total_deduplicated_jobs=len(deduped_jobs),
+                total_top_matches=len(top_matches),
+                excel_output_path=str(output_path),
+            )
+
+        return {
+            "run_id": run_id,
+            "data_mode": current_data_mode,
+            "raw_jobs": len(raw_records),
+            "fetched_raw_jobs": fetched_raw_record_count,
+            "freshness_filtered_out": freshness_stats["input_jobs"] - freshness_stats["kept_jobs"],
+            "freshness_stats": freshness_stats,
+            "total_jobs_processed": len(normalized_jobs),
+            "deduplicated_jobs": len(deduped_jobs),
+            "top_matches": len(top_matches),
+            "output_path": output_path,
+            "raw_snapshot_path": raw_snapshot_path,
+            "processed_snapshot_path": processed_snapshot_path,
+            "jobs": processed_jobs,
+        }
+    except Exception as exc:
+        if md_writer:
+            md_writer.fail_run(run_id, str(exc))
+        raise
 
 
 def main() -> None:

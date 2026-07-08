@@ -1,0 +1,38 @@
+version: 2
+
+models:
+  - name: mart_jobs_scored
+    columns:
+      - name: job_id
+        tests:
+          - not_null
+          - unique
+      - name: job_title
+        tests:
+          - not_null
+      - name: company
+        tests:
+          - not_null
+      - name: match_score
+        tests:
+          - not_null
+      - name: visa_signal
+        tests:
+          - accepted_values:
+              values: ["Positive", "Negative", "Unknown"]
+      - name: application_status
+        tests:
+          - accepted_values:
+              values: ["Not Applied", "Saved", "Applied", "Interview", "Rejected", "Offer", "Archived"]
+
+  - name: mart_top_matches
+    columns:
+      - name: job_id
+        tests:
+          - not_null
+
+  - name: mart_category_summary
+    columns:
+      - name: category_name
+        tests:
+          - not_null

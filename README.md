@@ -16,7 +16,11 @@ The sample candidate profile emphasizes Python, SQL, Spark/PySpark, dbt, Databri
 - Mock connector that runs without paid API keys.
 - Real-source connectors for Adzuna, SerpApi Google Jobs, Greenhouse, Lever, and USAJOBS.
 - Configurable posted-date freshness filter; default keeps only jobs posted within the last 24 hours.
-- Timestamped raw and processed JSON snapshots for every pipeline run.
+- Local debug JSON snapshots when `CAREERSIGNAL_WRITE_DEBUG_JSON=true`.
+- MotherDuck raw/staging/app schemas for production-style ELT mode.
+- dbt staging, intermediate, and mart models for dashboard-ready tables.
+- FastAPI repository layer with local and MotherDuck-backed implementations.
+- Minimal Next.js dashboard scaffold that talks only to FastAPI.
 - Normalized job schema with stable job IDs.
 - Deduplication by job ID, post link, and fuzzy company/title/location matching.
 - Salary parsing for annual and hourly pay ranges.
@@ -31,8 +35,12 @@ The sample candidate profile emphasizes Python, SQL, Spark/PySpark, dbt, Databri
 ```text
 config/                 YAML configuration
 data/sample/            Demo job postings
-data/raw/               Timestamped raw API/source snapshots
-data/processed/         Timestamped normalized/scored snapshots and discovery audits
+data/raw/               Local debug raw API/source snapshots
+data/processed/         Local debug processed snapshots and discovery audits
+dbt/                    dbt project for staging, intermediate, and mart models
+packages/               Shared storage, dbt, and repository services
+apps/api/               FastAPI backend
+apps/web/               Next.js dashboard scaffold
 src/config/             Config schemas and loader
 src/connectors/         Job source connectors
 src/ingestion/          Raw and processed data persistence
@@ -43,23 +51,39 @@ tests/                  Unit tests
 outputs/                Generated workbook output
 ```
 
-The processing flow is:
+Local processing flow:
 
 1. Load and validate YAML configs.
 2. Fetch jobs from one or more configured connectors.
 3. Normalize raw postings into the shared schema.
 4. Keep only postings inside the configured freshness window.
-5. Save a timestamped raw JSON snapshot for retained postings.
+5. Optionally save timestamped raw JSON for retained postings.
 6. Deduplicate jobs.
 7. Parse salary and extract skills.
 8. Classify industry, seniority, work arrangement, and visa signal.
 9. Score jobs against the candidate profile.
-10. Save a timestamped processed JSON snapshot.
+10. Optionally save timestamped processed JSON.
 11. Export the Excel workbook.
+
+MotherDuck processing flow:
+
+```text
+Connector APIs
+  -> raw.job_posts_raw
+  -> staging.python_jobs_processed
+  -> dbt staging models
+  -> dbt intermediate models
+  -> dbt mart models
+  -> FastAPI
+  -> Next.js Dashboard
+  -> Excel Export
+```
 
 ## Setup
 
 Python 3.11+ is recommended.
+
+For dbt, Python 3.11 or 3.12 is currently the safest choice. Python 3.14 may expose upstream dbt dependency compatibility issues.
 
 ```bash
 python -m venv .venv
@@ -80,6 +104,23 @@ copy .env.example .env
 ```
 
 The default `JOB_SOURCES=mock` runs entirely from `data/sample/sample_jobs.json`.
+
+Core data-mode settings:
+
+```text
+CAREERSIGNAL_DATA_MODE=local
+MOTHERDUCK_TOKEN=
+MOTHERDUCK_DATABASE=CareerSignal
+CAREERSIGNAL_LOCAL_DATA_DIR=data
+CAREERSIGNAL_OUTPUT_DIR=outputs
+CAREERSIGNAL_EXCEL_PATH=outputs/job_search_tracker.xlsx
+CAREERSIGNAL_WRITE_DEBUG_JSON=false
+DBT_PROJECT_DIR=dbt
+DBT_PROFILES_DIR=dbt
+DBT_TARGET=local
+CAREERSIGNAL_RUN_DBT=true
+CAREERSIGNAL_RUN_DBT_TESTS=true
+```
 
 ## Run The Pipeline
 
@@ -103,9 +144,9 @@ Total jobs processed: 15
 Deduplicated jobs: 15
 Top matches: ...
 Excel exported to: outputs/job_search_tracker_20260708_143012.xlsx
-Raw snapshot: data/raw/raw_jobs_20260708_143012.json
-Processed snapshot: data/processed/processed_jobs_20260708_143012.json
 ```
+
+If `CAREERSIGNAL_WRITE_DEBUG_JSON=true`, the summary also includes timestamped raw and processed debug snapshot paths.
 
 ## Run Tests
 
@@ -183,7 +224,7 @@ Supported source settings:
 - Lever: set `LEVER_COMPANY_SITES` to site names from URLs like `jobs.lever.co/{site}`.
 - USAJOBS: set `USAJOBS_USER_AGENT` and `USAJOBS_API_KEY` from developer.usajobs.gov.
 
-For each run, `WRITE_DATA_SNAPSHOTS=true` writes:
+When `CAREERSIGNAL_WRITE_DEBUG_JSON=true`, local debug snapshots are written to:
 
 - `data/raw/raw_jobs_<timestamp>.json`
 - `data/processed/processed_jobs_<timestamp>.json`
@@ -219,7 +260,7 @@ LEVER_COMPANY_SITES=...
 
 ## Excel Workbook
 
-CareerSignal exports a timestamped workbook using the configured output path as a base name, for example `outputs/job_search_tracker_20260708_143012.xlsx`. This keeps each run from replacing a previous workbook.
+CareerSignal exports a timestamped workbook using `CAREERSIGNAL_EXCEL_PATH` as a base name, for example `outputs/job_search_tracker_20260708_143012.xlsx`. This keeps each run from replacing a previous workbook.
 
 The workbook includes these tabs:
 
@@ -229,6 +270,71 @@ The workbook includes these tabs:
 - `Skill Gap Analysis`: skill frequency across jobs, candidate coverage, gap priority, and example titles.
 - `Company Priority List`: company-level match quality, salary, visa summary, and priority.
 
+In local mode, Excel is exported from Python processed data. In MotherDuck mode, Excel is exported from dbt mart tables so the dashboard and workbook share the same source of truth.
+
+## MotherDuck + dbt Analytics Layer
+
+MotherDuck mode makes Excel an export target instead of the primary source of truth. Raw JSON files are useful for debugging and offline development, but production-mode data should live in MotherDuck tables with dbt providing lineage, repeatable transformations, and dashboard-ready marts.
+
+Set:
+
+```text
+CAREERSIGNAL_DATA_MODE=motherduck
+MOTHERDUCK_DATABASE=CareerSignal
+MOTHERDUCK_TOKEN=<stored only in .env>
+DBT_TARGET=dev
+```
+
+Do not expose `MOTHERDUCK_TOKEN` in frontend code, README files, logs, tests, or committed examples.
+
+Initialize schemas:
+
+```bash
+python -m packages.careersignal_core.storage.init_motherduck
+```
+
+Run the pipeline in MotherDuck mode:
+
+```bash
+CAREERSIGNAL_DATA_MODE=motherduck python src/main.py
+```
+
+Run dbt manually:
+
+```bash
+cd dbt
+dbt debug --profiles-dir .
+dbt run --profiles-dir .
+dbt test --profiles-dir .
+```
+
+The dbt project is named `careersignal_dbt` and includes:
+
+- `raw` sources: `job_posts_raw`, `ingestion_runs`, `connector_errors`
+- `staging` sources: `python_jobs_processed`, `python_candidate_skills`
+- `app` source: `job_application_status`
+- staging models that standardize Python bridge output
+- intermediate models for dedupe, skill explosion, and latest application status
+- mart models for jobs, top matches, category summary, skill gap analysis, and company priorities
+
+The FastAPI backend queries mart tables through `MotherDuckJobRepository` when `CAREERSIGNAL_DATA_MODE=motherduck`. In local mode it uses `LocalJobRepository` and reads local workbook output as a fallback.
+
+FastAPI:
+
+```bash
+uvicorn apps.api.main:app --reload
+```
+
+Next.js dashboard:
+
+```bash
+cd apps/web
+npm install
+npm run dev
+```
+
+The Next.js frontend never receives MotherDuck credentials. It calls FastAPI endpoints such as `/api/jobs`, `/api/top-matches`, `/api/data/status`, `/api/dbt/run`, and `/api/dbt/test`.
+
 ## Connector Design
 
 Each connector implements `BaseJobConnector.fetch_jobs(category_config)` and returns raw job dictionaries that can be normalized by `src/processing/normalize.py`. API connectors are intentionally environment-driven so credentials are not hardcoded. Source adapters catch recoverable HTTP and JSON failures, log them, and allow the rest of the pipeline to continue.
@@ -236,10 +342,7 @@ Each connector implements `BaseJobConnector.fetch_jobs(category_config)` and ret
 ## Future Roadmap
 
 - Add Workday career-page parser where legally and technically appropriate.
-- Add DuckDB local persistence.
-- Add dbt models for raw, staging, and mart layers.
 - Add Power BI dashboard export.
-- Add Streamlit or FastAPI UI.
 - Add LLM-based JD extraction.
 - Add resume-to-JD matching.
 - Add tailored resume recommendation.

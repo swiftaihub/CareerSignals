@@ -222,3 +222,7 @@ outputs/*.xlsx
 
 # local json data files
 *.json
+
+# local DuckDB files
+*.duckdb
+*.duckdb.wal
