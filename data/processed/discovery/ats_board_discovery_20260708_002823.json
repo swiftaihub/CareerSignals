@@ -1,0 +1,48 @@
+{
+  "metadata": {
+    "target_count": 2,
+    "validated": true
+  },
+  "results": [
+    {
+      "company_name": "Lever Demo",
+      "source_url": "https://jobs.lever.co/leverdemo",
+      "final_url": "https://jobs.lever.co/leverdemo",
+      "greenhouse_tokens": [],
+      "lever_sites": [
+        "leverdemo"
+      ],
+      "validations": [
+        {
+          "source": "lever",
+          "identifier": "leverdemo",
+          "is_valid": true,
+          "job_count": 388,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "company_name": "Greenhouse Demo",
+      "source_url": "https://boards.greenhouse.io/vaulttec",
+      "final_url": "https://boards.greenhouse.io/vaulttec",
+      "greenhouse_tokens": [
+        "vaulttec"
+      ],
+      "lever_sites": [],
+      "validations": [
+        {
+          "source": "greenhouse",
+          "identifier": "vaulttec",
+          "is_valid": false,
+          "job_count": null,
+          "error": "404 Client Error: Not Found for url: https://boards-api.greenhouse.io/v1/boards/vaulttec/jobs?content=true"
+        }
+      ],
+      "errors": [
+        "Unable to fetch https://boards.greenhouse.io/vaulttec: 404 Client Error: Not Found for url: https://job-boards.greenhouse.io/vaulttec"
+      ]
+    }
+  ]
+}

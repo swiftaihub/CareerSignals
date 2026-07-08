@@ -1,0 +1,173 @@
+global_filters:
+  country: "US"
+  locations:
+    - "Remote"
+    - "New York, NY"
+    - "Wilmington, DE"
+    - "Philadelphia, PA"
+  work_type:
+    - "remote"
+    - "hybrid"
+  employment_type:
+    - "full-time"
+
+job_categories:
+  - category_name: "Data Scientist - Tech"
+    search_titles:
+      - "Data Scientist"
+      - "Product Data Scientist"
+      - "Machine Learning Data Scientist"
+    industries:
+      - "technology"
+      - "software"
+      - "AI"
+      - "SaaS"
+    seniority:
+      - "Mid-level"
+      - "Senior"
+
+  - category_name: "Data Scientist - Healthcare"
+    search_titles:
+      - "Healthcare Data Scientist"
+      - "Clinical Data Scientist"
+      - "Health Analytics Data Scientist"
+      - "Product Data Scientist Healthcare"
+    industries:
+      - "healthcare"
+      - "health tech"
+      - "digital health"
+      - "patient engagement"
+    seniority:
+      - "Mid-level"
+      - "Senior"
+
+  - category_name: "BI Analyst - Banking"
+    search_titles:
+      - "Senior BI Analyst"
+      - "Business Intelligence Analyst"
+      - "Risk Information Analyst"
+      - "Analytics Reporting Analyst"
+    industries:
+      - "banking"
+      - "financial services"
+      - "credit card"
+      - "consumer banking"
+    seniority:
+      - "Mid-level"
+      - "Senior"
+
+  - category_name: "Risk Analyst - Fintech"
+    search_titles:
+      - "Risk Analyst"
+      - "Credit Risk Analyst"
+      - "Fraud Strategy Analyst"
+      - "Risk Analytics Analyst"
+    industries:
+      - "fintech"
+      - "consumer lending"
+      - "credit risk"
+      - "fraud"
+    seniority:
+      - "Mid-level"
+      - "Senior"
+
+  - category_name: "BI / Risk Analyst - Banking & Fintech"
+    search_titles:
+      - "Senior BI Analyst"
+      - "Risk Analyst"
+      - "Credit Risk Analyst"
+      - "Fraud Strategy Analyst"
+      - "Business Intelligence Analyst"
+      - "Risk Information Analyst"
+    industries:
+      - "banking"
+      - "fintech"
+      - "consumer lending"
+      - "credit risk"
+      - "fraud"
+    seniority:
+      - "Mid-level"
+      - "Senior"
+
+  - category_name: "Analytics Engineer"
+    search_titles:
+      - "Analytics Engineer"
+      - "Senior Analytics Engineer"
+      - "Data Analytics Engineer"
+      - "BI Engineer"
+    industries:
+      - "technology"
+      - "SaaS"
+      - "data platform"
+      - "cloud"
+    seniority:
+      - "Mid-level"
+      - "Senior"
+
+  - category_name: "Product Data Scientist"
+    search_titles:
+      - "Product Data Scientist"
+      - "Product Analytics Data Scientist"
+      - "Experimentation Data Scientist"
+    industries:
+      - "technology"
+      - "software"
+      - "SaaS"
+      - "AI"
+    seniority:
+      - "Mid-level"
+      - "Senior"
+
+  - category_name: "Healthcare Analytics Engineer"
+    search_titles:
+      - "Healthcare Analytics Engineer"
+      - "Clinical Analytics Engineer"
+      - "Health Data Engineer"
+    industries:
+      - "healthcare"
+      - "health tech"
+      - "digital health"
+      - "provider analytics"
+    seniority:
+      - "Mid-level"
+      - "Senior"
+
+  - category_name: "Fraud Strategy Analyst"
+    search_titles:
+      - "Fraud Strategy Analyst"
+      - "Fraud Analytics Analyst"
+      - "Fraud Risk Analyst"
+    industries:
+      - "fintech"
+      - "banking"
+      - "payments"
+      - "fraud"
+    seniority:
+      - "Mid-level"
+      - "Senior"
+
+  - category_name: "Credit Risk Analyst"
+    search_titles:
+      - "Credit Risk Analyst"
+      - "Credit Strategy Analyst"
+      - "Consumer Lending Risk Analyst"
+    industries:
+      - "banking"
+      - "fintech"
+      - "consumer lending"
+      - "credit risk"
+    seniority:
+      - "Mid-level"
+      - "Senior"
+
+ranking_weights:
+  title_match: 0.25
+  required_skill_match: 0.25
+  industry_match: 0.20
+  salary_match: 0.10
+  work_arrangement_match: 0.10
+  visa_signal_match: 0.10
+
+output:
+  excel_file: "outputs/job_search_tracker.xlsx"
+  top_match_threshold: 80

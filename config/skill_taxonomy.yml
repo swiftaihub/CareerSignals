@@ -1,0 +1,119 @@
+skill_aliases:
+  power_bi:
+    canonical: "Power BI"
+    aliases:
+      - "PowerBI"
+      - "Power BI"
+      - "Microsoft Power BI"
+
+  spark:
+    canonical: "Spark"
+    aliases:
+      - "Apache Spark"
+      - "Spark"
+      - "PySpark"
+
+  dbt:
+    canonical: "dbt"
+    aliases:
+      - "dbt"
+      - "data build tool"
+
+  credit_risk:
+    canonical: "Credit Risk"
+    aliases:
+      - "credit risk"
+      - "loan risk"
+      - "consumer lending risk"
+
+  llm:
+    canonical: "LLM"
+    aliases:
+      - "large language model"
+      - "LLM"
+      - "generative AI"
+      - "GenAI"
+
+  rest_apis:
+    canonical: "REST APIs"
+    aliases:
+      - "REST API"
+      - "REST APIs"
+      - "API integrations"
+
+  tableau:
+    canonical: "Tableau"
+    aliases:
+      - "Tableau"
+      - "Tableau Desktop"
+      - "Tableau Server"
+
+  dashboards:
+    canonical: "dashboard"
+    aliases:
+      - "dashboard"
+      - "dashboards"
+      - "KPI dashboards"
+
+  metric_layer:
+    canonical: "metric layer"
+    aliases:
+      - "metric layer"
+      - "metrics layer"
+      - "semantic layer"
+
+  healthcare_analytics:
+    canonical: "healthcare analytics"
+    aliases:
+      - "healthcare analytics"
+      - "clinical analytics"
+      - "patient analytics"
+
+  product_analytics:
+    canonical: "product analytics"
+    aliases:
+      - "product analytics"
+      - "experimentation"
+      - "A/B testing"
+
+  rag:
+    canonical: "RAG"
+    aliases:
+      - "RAG"
+      - "retrieval augmented generation"
+      - "retrieval-augmented generation"
+
+  airflow:
+    canonical: "Airflow"
+    aliases:
+      - "Airflow"
+      - "Apache Airflow"
+
+  looker:
+    canonical: "Looker"
+    aliases:
+      - "Looker"
+      - "LookML"
+
+  fivetran:
+    canonical: "Fivetran"
+    aliases:
+      - "Fivetran"
+
+  kafka:
+    canonical: "Kafka"
+    aliases:
+      - "Kafka"
+      - "Apache Kafka"
+
+  sas:
+    canonical: "SAS"
+    aliases:
+      - "SAS"
+      - "SAS Viya"
+
+  excel:
+    canonical: "Excel"
+    aliases:
+      - "Excel"
+      - "advanced Excel"
