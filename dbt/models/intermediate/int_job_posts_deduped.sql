@@ -1,3 +1,13 @@
+{{ config(
+    materialized='incremental',
+    schema='intermediate',
+    unique_key='job_id',
+    incremental_strategy='delete+insert',
+    on_schema_change='sync_all_columns',
+    pre_hook="{{ careersignal_clear_incremental_model() }}",
+    tags=['intermediate', 'motherduck', 'incremental']
+) }}
+
 with ranked as (
     select
         *,

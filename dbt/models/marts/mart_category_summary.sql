@@ -1,3 +1,13 @@
+{{ config(
+    materialized='incremental',
+    schema='mart',
+    unique_key='category_name',
+    incremental_strategy='delete+insert',
+    on_schema_change='sync_all_columns',
+    pre_hook="{{ careersignal_clear_incremental_model() }}",
+    tags=['mart', 'motherduck', 'incremental', 'excel']
+) }}
+
 select
     category_name,
     count(*) as jobs_found,

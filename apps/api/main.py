@@ -136,8 +136,8 @@ def download_excel_endpoint(repository: JobRepository = Depends(get_repository))
 
 
 @app.post("/api/dbt/run")
-def run_dbt_endpoint():
-    run_dbt(dbt_project_dir(), dbt_profiles_dir())
+def run_dbt_endpoint(full_refresh: bool = False):
+    run_dbt(dbt_project_dir(), dbt_profiles_dir(), full_refresh=full_refresh)
     return {"status": "completed"}
 
 

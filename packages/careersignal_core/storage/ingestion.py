@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import os
 from typing import Any
 
 from packages.careersignal_core.storage.motherduck import MotherDuckService
 from src.config.schemas import Candidate, JobCategoryConfig
 from src.utils.hashing import stable_hash
+from src.utils.progress import ProgressReporter
 from src.utils.text_cleaning import clean_text
 
 
@@ -46,6 +48,14 @@ def _raw_job_key(record: dict[str, Any]) -> str:
         or record.get("title")
         or record.get("job_title")
     )
+
+
+def _batch_size() -> int:
+    raw_value = os.getenv("CAREERSIGNAL_MOTHERDUCK_BATCH_SIZE", "1000")
+    try:
+        return max(int(raw_value), 1)
+    except ValueError:
+        return 1000
 
 
 class MotherDuckIngestionWriter:
@@ -123,67 +133,103 @@ class MotherDuckIngestionWriter:
                 [_now(), error_message[:2000], run_id],
             )
 
-    def write_raw_jobs(self, run_id: str, raw_records: list[dict[str, Any]]) -> int:
-        rows: list[tuple[Any, ...]] = []
+    def _raw_job_row(
+        self,
+        run_id: str,
+        record: dict[str, Any],
+        fetched_at: datetime,
+    ) -> tuple[Any, ...]:
+        category = record.get("_careersignal_category")
+        category_name = (
+            category.category_name
+            if isinstance(category, JobCategoryConfig)
+            else clean_text(record.get("category_name"))
+        )
+        query_title = ", ".join(category.search_titles) if isinstance(category, JobCategoryConfig) else None
+        payload = _raw_payload(record)
+        payload_json = canonical_json(payload)
+        payload_hash = stable_hash(payload_json, length=32)
+        raw_job_key = _raw_job_key(record)
+        raw_record_id = stable_hash(
+            run_id,
+            record.get("_careersignal_source"),
+            raw_job_key,
+            payload_hash,
+            length=32,
+        )
+        source_url = clean_text(record.get("jd_post_link") or record.get("url") or record.get("apply_link"))
+
+        return (
+            raw_record_id,
+            run_id,
+            clean_text(record.get("_careersignal_source") or record.get("source")),
+            category_name,
+            query_title,
+            None,
+            raw_job_key,
+            payload_json,
+            payload_hash,
+            fetched_at,
+            source_url,
+            "success",
+        )
+
+    def write_raw_jobs(
+        self,
+        run_id: str,
+        raw_records: list[dict[str, Any]],
+        progress: ProgressReporter | None = None,
+    ) -> int:
         fetched_at = _now()
-
-        for record in raw_records:
-            category = record.get("_careersignal_category")
-            category_name = (
-                category.category_name
-                if isinstance(category, JobCategoryConfig)
-                else clean_text(record.get("category_name"))
-            )
-            query_title = ", ".join(category.search_titles) if isinstance(category, JobCategoryConfig) else None
-            payload = _raw_payload(record)
-            payload_json = canonical_json(payload)
-            payload_hash = stable_hash(payload_json, length=32)
-            raw_job_key = _raw_job_key(record)
-            raw_record_id = stable_hash(run_id, record.get("_careersignal_source"), raw_job_key, payload_hash, length=32)
-            source_url = clean_text(record.get("jd_post_link") or record.get("url") or record.get("apply_link"))
-
-            rows.append(
-                (
-                    raw_record_id,
-                    run_id,
-                    clean_text(record.get("_careersignal_source") or record.get("source")),
-                    category_name,
-                    query_title,
-                    None,
-                    raw_job_key,
-                    payload_json,
-                    payload_hash,
-                    fetched_at,
-                    source_url,
-                    "success",
-                )
-            )
-
-        if not rows:
+        total_records = len(raw_records)
+        if not total_records:
             return 0
 
-        with self.service.connect() as conn:
-            conn.executemany(
-                """
-                insert or ignore into raw.job_posts_raw (
-                    raw_record_id,
-                    run_id,
-                    source,
-                    category_name,
-                    query_title,
-                    query_location,
-                    raw_job_key,
-                    raw_payload,
-                    raw_payload_hash,
-                    fetched_at,
-                    source_url,
-                    connector_status
-                )
-                values (?, ?, ?, ?, ?, ?, ?, cast(? as json), ?, ?, ?, ?)
-                """,
-                rows,
+        batch_size = _batch_size()
+        inserted_count = 0
+        batch: list[tuple[Any, ...]] = []
+        records_iterable = (
+            progress.iter(
+                raw_records,
+                "Preparing and writing raw MotherDuck rows",
+                total=total_records,
             )
-        return len(rows)
+            if progress
+            else raw_records
+        )
+        with self.service.connect() as conn:
+            for record in records_iterable:
+                batch.append(self._raw_job_row(run_id, record, fetched_at))
+                if len(batch) >= batch_size:
+                    self._insert_raw_job_batch(conn, batch)
+                    inserted_count += len(batch)
+                    batch.clear()
+            if batch:
+                self._insert_raw_job_batch(conn, batch)
+                inserted_count += len(batch)
+        return inserted_count
+
+    def _insert_raw_job_batch(self, conn: Any, rows: list[tuple[Any, ...]]) -> None:
+        conn.executemany(
+            """
+            insert or ignore into raw.job_posts_raw (
+                raw_record_id,
+                run_id,
+                source,
+                category_name,
+                query_title,
+                query_location,
+                raw_job_key,
+                raw_payload,
+                raw_payload_hash,
+                fetched_at,
+                source_url,
+                connector_status
+            )
+            values (?, ?, ?, ?, ?, ?, ?, cast(? as json), ?, ?, ?, ?)
+            """,
+            rows,
+        )
 
     def write_connector_errors(
         self,
@@ -225,10 +271,20 @@ class MotherDuckIngestionWriter:
             )
         return len(rows)
 
-    def write_processed_jobs(self, run_id: str, jobs: list[dict[str, Any]]) -> int:
+    def write_processed_jobs(
+        self,
+        run_id: str,
+        jobs: list[dict[str, Any]],
+        progress: ProgressReporter | None = None,
+    ) -> int:
         inserted_at = _now()
         rows: list[tuple[Any, ...]] = []
-        for job in jobs:
+        jobs_iterable = (
+            progress.iter(jobs, "Preparing processed MotherDuck rows", total=len(jobs))
+            if progress
+            else jobs
+        )
+        for job in jobs_iterable:
             rows.append(
                 (
                     job.get("job_id"),
@@ -266,45 +322,53 @@ class MotherDuckIngestionWriter:
         if not rows:
             return 0
 
+        batch_size = _batch_size()
+        inserted_count = 0
         with self.service.connect() as conn:
-            conn.executemany(
-                """
-                insert into staging.python_jobs_processed (
-                    job_id,
-                    run_id,
-                    source,
-                    category_name,
-                    job_title,
-                    normalized_title,
-                    company,
-                    industry,
-                    location,
-                    work_arrangement,
-                    employment_type,
-                    seniority,
-                    salary_min,
-                    salary_max,
-                    salary_midpoint,
-                    salary_range_text,
-                    date_posted,
-                    date_collected,
-                    jd_post_link,
-                    apply_link,
-                    job_description,
-                    required_skills,
-                    preferred_skills,
-                    all_extracted_skills,
-                    visa_signal,
-                    match_score,
-                    match_tier,
-                    reasoning_summary,
-                    inserted_at
-                )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                rows,
+            for index in range(0, len(rows), batch_size):
+                batch = rows[index : index + batch_size]
+                self._insert_processed_job_batch(conn, batch)
+                inserted_count += len(batch)
+        return inserted_count
+
+    def _insert_processed_job_batch(self, conn: Any, rows: list[tuple[Any, ...]]) -> None:
+        conn.executemany(
+            """
+            insert into staging.python_jobs_processed (
+                job_id,
+                run_id,
+                source,
+                category_name,
+                job_title,
+                normalized_title,
+                company,
+                industry,
+                location,
+                work_arrangement,
+                employment_type,
+                seniority,
+                salary_min,
+                salary_max,
+                salary_midpoint,
+                salary_range_text,
+                date_posted,
+                date_collected,
+                jd_post_link,
+                apply_link,
+                job_description,
+                required_skills,
+                preferred_skills,
+                all_extracted_skills,
+                visa_signal,
+                match_score,
+                match_tier,
+                reasoning_summary,
+                inserted_at
             )
-        return len(rows)
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
 
     def write_candidate_skills(self, candidate: Candidate) -> int:
         rows = [

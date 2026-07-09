@@ -1,8 +1,8 @@
 # CareerSignal
 
-CareerSignal is a configurable local job-search intelligence pipeline. It collects job postings, normalizes messy source records, extracts structured fields from job descriptions, ranks jobs against a target candidate profile, and exports a polished Excel workbook for search planning.
+CareerSignal is a configurable job-search intelligence pipeline that runs from your local machine and can use MotherDuck as its default analytics store. It collects job postings, normalizes messy source records, extracts structured fields from job descriptions, ranks jobs against a target candidate profile, and exports a polished Excel workbook for search planning.
 
-The MVP runs locally with mock/sample job data by default and can ingest real data from Adzuna, SerpApi Google Jobs, Greenhouse, Lever, and USAJOBS when credentials or public board identifiers are configured.
+The MVP defaults to MotherDuck mode with mock/sample job data as the source and can ingest real data from Adzuna, SerpApi Google Jobs, Greenhouse, Lever, and USAJOBS when credentials or public board identifiers are configured. Offline local mode remains available by setting `CAREERSIGNAL_DATA_MODE=local`.
 
 ## Why This Exists
 
@@ -15,7 +15,7 @@ The sample candidate profile emphasizes Python, SQL, Spark/PySpark, dbt, Databri
 - YAML-driven job categories, filters, candidate profile, ranking weights, and skill aliases.
 - Mock connector that runs without paid API keys.
 - Real-source connectors for Adzuna, SerpApi Google Jobs, Greenhouse, Lever, and USAJOBS.
-- Configurable posted-date freshness filter; default keeps only jobs posted within the last 24 hours.
+- Configurable posted-date freshness filter at the API/raw-ingestion boundary; default loads only jobs posted within the last 24 hours.
 - Local debug JSON snapshots when `CAREERSIGNAL_WRITE_DEBUG_JSON=true`.
 - MotherDuck raw/staging/app schemas for production-style ELT mode.
 - dbt staging, intermediate, and mart models for dashboard-ready tables.
@@ -56,8 +56,8 @@ Local processing flow:
 1. Load and validate YAML configs.
 2. Fetch jobs from one or more configured connectors.
 3. Normalize raw postings into the shared schema.
-4. Keep only postings inside the configured freshness window.
-5. Optionally save timestamped raw JSON for retained postings.
+4. Keep only API/source records inside the configured freshness window before raw ingestion.
+5. Optionally save timestamped raw JSON for retained source records.
 6. Deduplicate jobs.
 7. Parse salary and extract skills.
 8. Classify industry, seniority, work arrangement, and visa signal.
@@ -103,21 +103,24 @@ Optional environment setup:
 copy .env.example .env
 ```
 
-The default `JOB_SOURCES=mock` runs entirely from `data/sample/sample_jobs.json`.
+The default `JOB_SOURCES=mock` uses `data/sample/sample_jobs.json` as the source data. Because the default data mode is MotherDuck, set `MOTHERDUCK_TOKEN` before running the full pipeline, or switch `CAREERSIGNAL_DATA_MODE=local` for offline-only development.
 
 Core data-mode settings:
 
 ```text
-CAREERSIGNAL_DATA_MODE=local
+CAREERSIGNAL_DATA_MODE=motherduck
 MOTHERDUCK_TOKEN=
 MOTHERDUCK_DATABASE=CareerSignal
 CAREERSIGNAL_LOCAL_DATA_DIR=data
 CAREERSIGNAL_OUTPUT_DIR=outputs
 CAREERSIGNAL_EXCEL_PATH=outputs/job_search_tracker.xlsx
 CAREERSIGNAL_WRITE_DEBUG_JSON=false
+CAREERSIGNAL_EXPORT_EXCEL=false
+CAREERSIGNAL_PROGRESS=true
+CAREERSIGNAL_MOTHERDUCK_BATCH_SIZE=1000
 DBT_PROJECT_DIR=dbt
 DBT_PROFILES_DIR=dbt
-DBT_TARGET=local
+DBT_TARGET=dev
 CAREERSIGNAL_RUN_DBT=true
 CAREERSIGNAL_RUN_DBT_TESTS=true
 ```
@@ -192,7 +195,7 @@ freshness_filter:
   include_unknown_dates: false
 ```
 
-With the default settings, each refresh keeps only jobs posted within the last 24 hours. Jobs with unknown or unparseable posted dates are excluded unless `include_unknown_dates` is set to `true`. For sources that expose only a date without a timestamp, CareerSignal treats postings on the cutoff date as eligible.
+With the default settings, each API refresh loads only jobs posted within the last 24 hours into the raw ingestion boundary. Jobs with unknown or unparseable posted dates are excluded unless `include_unknown_dates` is set to `true`. For sources that expose only a date without a timestamp, CareerSignal treats postings on the cutoff date as eligible. dbt models do not apply this 24-hour cutoff; they transform the rows already present in the raw/staging source tables.
 
 ## Real Data Ingestion
 
@@ -260,7 +263,9 @@ LEVER_COMPANY_SITES=...
 
 ## Excel Workbook
 
-CareerSignal exports a timestamped workbook using `CAREERSIGNAL_EXCEL_PATH` as a base name, for example `outputs/job_search_tracker_20260708_143012.xlsx`. This keeps each run from replacing a previous workbook.
+In MotherDuck mode, scheduled/API refreshes do not write local Excel files by default. Set `CAREERSIGNAL_EXPORT_EXCEL=true`, pass `--export-excel` to `scripts\refresh_motherduck.py`, or use the explicit FastAPI Excel export endpoint when you want a workbook.
+
+When enabled, CareerSignal exports a timestamped workbook using `CAREERSIGNAL_EXCEL_PATH` as a base name, for example `outputs/job_search_tracker_20260708_143012.xlsx`. This keeps each run from replacing a previous workbook.
 
 The workbook includes these tabs:
 
@@ -299,14 +304,36 @@ Run the pipeline in MotherDuck mode:
 CAREERSIGNAL_DATA_MODE=motherduck python src/main.py
 ```
 
-Run dbt manually:
+Run the full API-to-dbt refresh path. This loads `.env`, calls the configured job APIs, writes raw and processed bridge rows to MotherDuck, runs dbt with `--full-refresh`, and tests dbt without writing local output files:
+
+```bash
+python scripts\refresh_motherduck.py
+```
+
+Use incremental dbt refresh instead of full refresh:
+
+```bash
+python scripts\refresh_motherduck.py --incremental
+```
+
+Export Excel as an explicit local artifact:
+
+```bash
+python scripts\refresh_motherduck.py --export-excel
+```
+
+Run dbt manually against existing MotherDuck source tables:
 
 ```bash
 cd dbt
 dbt debug --profiles-dir .
-dbt run --profiles-dir .
+dbt run --profiles-dir . --full-refresh
 dbt test --profiles-dir .
 ```
+
+Manual dbt commands do not call APIs and do not parse `raw.job_posts_raw` into scored jobs. They rebuild dbt models from the existing bridge source `staging.python_jobs_processed`. Use `scripts\refresh_motherduck.py` when you want API ingestion and dbt refresh in one command.
+
+Before dbt starts, CareerSignal shows progress for connector fetches, normalization, freshness filtering, raw MotherDuck writes, deduplication, scoring, and processed bridge writes. The raw-write step can be slow on large runs because Python serializes and hashes each raw JSON payload, then sends batches to remote MotherDuck where `raw_payload` is cast to JSON. Tune `CAREERSIGNAL_MOTHERDUCK_BATCH_SIZE` if needed; `1000` is a conservative default.
 
 The dbt project is named `careersignal_dbt` and includes:
 
@@ -316,6 +343,10 @@ The dbt project is named `careersignal_dbt` and includes:
 - staging models that standardize Python bridge output
 - intermediate models for dedupe, skill explosion, and latest application status
 - mart models for jobs, top matches, category summary, skill gap analysis, and company priorities
+
+Each SQL model includes an explicit `config(...)` block and materializes as an incremental MotherDuck/DuckDB table using `incremental_strategy='delete+insert'`, a stable `unique_key`, and `on_schema_change='sync_all_columns'`. Append-oriented staging models preserve new bridge observations; current-state intermediate and mart models clear their target table during incremental runs before inserting the latest result set, which prevents stale dashboard rows while keeping dbt in incremental materialization mode.
+
+When `CAREERSIGNAL_DATA_MODE=motherduck`, the Python dbt runner uses the `dev` dbt target so model refreshes load into the MotherDuck database named by `MOTHERDUCK_DATABASE`, defaulting to `CareerSignal`.
 
 The FastAPI backend queries mart tables through `MotherDuckJobRepository` when `CAREERSIGNAL_DATA_MODE=motherduck`. In local mode it uses `LocalJobRepository` and reads local workbook output as a fallback.
 

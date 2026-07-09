@@ -1,5 +1,5 @@
 careersignal_dbt:
-  target: "{{ env_var('DBT_TARGET', 'local') }}"
+  target: "{{ env_var('DBT_TARGET', 'dev') }}"
   outputs:
     local:
       type: duckdb

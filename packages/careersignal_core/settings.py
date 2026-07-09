@@ -9,8 +9,8 @@ from pathlib import Path
 def data_mode() -> str:
     """Return the configured data mode: local or motherduck."""
 
-    value = os.getenv("CAREERSIGNAL_DATA_MODE", "local").strip().casefold()
-    return value if value in {"local", "motherduck"} else "local"
+    value = os.getenv("CAREERSIGNAL_DATA_MODE", "motherduck").strip().casefold()
+    return value if value in {"local", "motherduck"} else "motherduck"
 
 
 def is_motherduck_mode() -> bool:

@@ -1,3 +1,13 @@
+{{ config(
+    materialized='incremental',
+    schema='intermediate',
+    unique_key='job_skill_key',
+    incremental_strategy='delete+insert',
+    on_schema_change='sync_all_columns',
+    pre_hook="{{ careersignal_clear_incremental_model() }}",
+    tags=['intermediate', 'motherduck', 'incremental']
+) }}
+
 with exploded as (
     select
         jobs.job_id,
@@ -16,7 +26,8 @@ cleaned as (
     where trim(skill) <> ''
 )
 
-select
+select distinct
+    lower(cleaned.job_id || '|' || cleaned.skill) as job_skill_key,
     cleaned.job_id,
     cleaned.job_title,
     cleaned.skill,

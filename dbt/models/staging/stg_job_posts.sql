@@ -1,3 +1,12 @@
+{{ config(
+    materialized='incremental',
+    schema='staging',
+    unique_key=['job_id', 'run_id'],
+    incremental_strategy='delete+insert',
+    on_schema_change='sync_all_columns',
+    tags=['staging', 'motherduck', 'incremental']
+) }}
+
 select
     job_id,
     run_id,
@@ -30,3 +39,6 @@ select
     inserted_at
 from {{ source('staging', 'python_jobs_processed') }}
 where job_id is not null
+{% if is_incremental() %}
+  and inserted_at >= coalesce((select max(inserted_at) from {{ this }}), timestamp '1900-01-01')
+{% endif %}
