@@ -2,8 +2,8 @@ import "./globals.css";
 import type { ReactNode } from "react";
 
 export const metadata = {
-  title: "CareerSignal",
-  description: "Job-search intelligence dashboard"
+  title: "CareerSignal Personal Dashboard",
+  description: "Enterprise-grade personal job-search intelligence dashboard"
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

@@ -20,7 +20,7 @@ The sample candidate profile emphasizes Python, SQL, Spark/PySpark, dbt, Databri
 - MotherDuck raw/staging/app schemas for production-style ELT mode.
 - dbt staging, intermediate, and mart models for dashboard-ready tables.
 - FastAPI repository layer with local and MotherDuck-backed implementations.
-- Minimal Next.js dashboard scaffold that talks only to FastAPI.
+- Polished FastAPI + Next.js personal dashboard that talks only to FastAPI.
 - Normalized job schema with stable job IDs.
 - Deduplication by job ID, post link, and fuzzy company/title/location matching.
 - Salary parsing for annual and hourly pay ranges.
@@ -28,6 +28,7 @@ The sample candidate profile emphasizes Python, SQL, Spark/PySpark, dbt, Databri
 - Industry, seniority, work-arrangement, and visa-sponsorship classification.
 - Weighted match scoring with deterministic reasoning summaries.
 - Excel workbook export with five tabs, filters, frozen headers, clickable links, salary formatting, and score conditional formatting.
+- Application-status workflow for saved, applied, interview, rejected, offer, and archived roles.
 - Pytest coverage for core processing and export behavior.
 
 ## Architecture
@@ -277,6 +278,68 @@ The workbook includes these tabs:
 
 In local mode, Excel is exported from Python processed data. In MotherDuck mode, Excel is exported from dbt mart tables so the dashboard and workbook share the same source of truth.
 
+## FastAPI + Next.js Personal Dashboard
+
+CareerSignal now includes a polished personal dashboard for job-search intelligence. The frontend is a Next.js App Router application with TypeScript, Tailwind CSS, shadcn-style reusable components, TanStack Table, Recharts, and Lucide icons. It never reads local files or calls MotherDuck directly; every page uses the FastAPI service layer.
+
+Run the backend:
+
+```bash
+uvicorn apps.api.main:app --reload
+```
+
+Run the frontend:
+
+```bash
+cd apps/web
+npm install
+npm run dev
+```
+
+Set the frontend API base URL in `apps/web/.env.local` or use the example file:
+
+```text
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+```
+
+FastAPI allows local browser access from `http://localhost:3000` by default through `CORS_ORIGINS`. MotherDuck credentials stay in backend environment variables such as `MOTHERDUCK_TOKEN`; do not expose them with a `NEXT_PUBLIC_` prefix.
+
+Dashboard routes:
+
+- `/`: product home page explaining the problem, solution, value, stack, architecture, use cases, and SaaS evolution path.
+- `/dashboard`: metrics, category chart, visa distribution, work-arrangement distribution, match-tier distribution, and latest top matches from `/api/dashboard/summary`.
+- `/jobs`: searchable and filterable Job Explorer with pagination, sorting, status updates, JD/apply links, and a detail drawer.
+- `/top-matches`: focused daily review queue for high-scoring roles from `/api/top-matches`.
+- `/skill-gap`: skill frequency, candidate coverage, and gap priority table from `/api/skill-gap`.
+- `/companies`: company-priority analysis from `/api/company-priority`.
+- `/settings`: operational controls for pipeline runs, dbt runs/tests, Excel export, download, and data-status metadata.
+
+Primary API endpoints:
+
+- `GET /api/health` and `GET /health`
+- `GET /api/jobs` with `limit`, `offset`, `page`, `page_size`, `category_name`, `min_match_score`, `max_match_score`, `company`, `industry`, `location`, `work_arrangement`, `visa_signal`, `application_status`, `search`, `sort_by`, and `sort_order`
+- `GET /api/jobs/{job_id}`
+- `PATCH /api/jobs/{job_id}/status`
+- `GET /api/dashboard/summary`
+- `GET /api/top-matches`
+- `GET /api/category-summary`
+- `GET /api/skill-gap`
+- `GET /api/company-priority`
+- `GET /api/data/status`
+- `POST /api/pipeline/run`
+- `POST /api/dbt/run`
+- `POST /api/dbt/test`
+- `POST /api/excel/export`
+- `GET /api/excel/download`
+
+FastAPI chooses the repository implementation from `CAREERSIGNAL_DATA_MODE`. In `motherduck` mode, it queries dbt mart tables through `MotherDuckJobRepository`. In `local` mode, it reads the latest generated Excel workbook through `LocalJobRepository`. Both modes return the same API-facing field names, so the frontend stays typed and data-mode agnostic.
+
+Application status updates use `user_id=personal_user` until authentication is added. In MotherDuck mode, statuses are persisted to `app.job_application_status`. In local mode, statuses are persisted to a small sidecar file under `outputs/` so the offline dashboard remains usable.
+
+The Settings page calls backend actions only. `Run Pipeline` executes the configured connector-to-processing flow, dbt buttons run the dbt project against the configured profiles directory, and Excel export writes a timestamped workbook from local processed data or MotherDuck/dbt mart tables depending on the active mode.
+
+Future SaaS evolution can add Supabase Auth, per-user candidate profiles, hosted refresh jobs, and multi-user workspaces without changing the rule that the browser talks only to FastAPI.
+
 ## MotherDuck + dbt Analytics Layer
 
 MotherDuck mode makes Excel an export target instead of the primary source of truth. Raw JSON files are useful for debugging and offline development, but production-mode data should live in MotherDuck tables with dbt providing lineage, repeatable transformations, and dashboard-ready marts.
@@ -372,15 +435,12 @@ Each connector implements `BaseJobConnector.fetch_jobs(category_config)` and ret
 
 ## Future Roadmap
 
-- Add Workday career-page parser where legally and technically appropriate.
-- Add Power BI dashboard export.
-- Add LLM-based JD extraction.
-- Add resume-to-JD matching.
-- Add tailored resume recommendation.
-- Add cover-letter or outreach-message draft generation.
-- Add application-status tracking.
-- Add GitHub Actions scheduled refresh.
-- Add cloud deployment later.
+- Phase 1: CLI pipeline + Excel export.
+- Phase 2: MotherDuck + dbt analytics layer.
+- Phase 3: FastAPI + Next.js personal dashboard.
+- Phase 4: application status workflow.
+- Phase 5: Supabase Auth + user profiles.
+- Phase 6: hosted multi-user SaaS.
 
 ## Notes
 
