@@ -1,0 +1,14 @@
+careersignal_dbt:
+  target: "{{ env_var('DBT_TARGET', 'dev') }}"
+  outputs:
+    local:
+      type: duckdb
+      path: "../data/local/careersignal.duckdb"
+      schema: main
+      threads: 4
+
+    dev:
+      type: duckdb
+      path: "md:{{ env_var('MOTHERDUCK_DATABASE', 'CareerSignal') }}?motherduck_token={{ env_var('MOTHERDUCK_TOKEN') }}"
+      schema: main
+      threads: 4

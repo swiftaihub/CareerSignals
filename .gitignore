@@ -151,6 +151,7 @@ activemq-data/
 .env
 .envrc
 .venv
+.venv*/
 env/
 venv/
 ENV/
@@ -222,3 +223,19 @@ outputs/*.xlsx
 
 # local json data files
 *.json
+!apps/web/package.json
+!apps/web/package-lock.json
+!apps/web/tsconfig.json
+
+# Node / Next.js local artifacts
+node_modules/
+.next/
+apps/web/node_modules/
+apps/web/.next/
+
+# local DuckDB files
+*.duckdb
+*.duckdb.wal
+
+# dbt local user state
+dbt/.user.yml
