@@ -14,11 +14,19 @@ function scoreClass(score?: number | null) {
   return "border-neutral-200 bg-neutral-100 text-neutral-700";
 }
 
-export function MatchScoreBadge({ score, tier }: { score?: number | null; tier?: string | null }) {
+export function MatchScoreBadge({
+  score,
+  tier,
+  compact = false
+}: {
+  score?: number | null;
+  tier?: string | null;
+  compact?: boolean;
+}) {
   return (
     <span className={cn("badge", scoreClass(score))}>
       {formatScore(score)}
-      {tier ? <span className="ml-1 hidden md:inline">/ {tier}</span> : null}
+      {tier && !compact ? <span className="ml-1 hidden md:inline">/ {tier}</span> : null}
     </span>
   );
 }

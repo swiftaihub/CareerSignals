@@ -296,6 +296,8 @@ class MotherDuckIngestionWriter:
                     job.get("company"),
                     job.get("industry"),
                     job.get("location"),
+                    job.get("location_normalized"),
+                    job.get("location_group"),
                     job.get("work_arrangement"),
                     job.get("employment_type"),
                     job.get("seniority"),
@@ -312,6 +314,9 @@ class MotherDuckIngestionWriter:
                     canonical_json(job.get("preferred_skills") or []),
                     canonical_json(job.get("all_extracted_skills") or []),
                     job.get("visa_signal"),
+                    job.get("visa_status"),
+                    job.get("visa_evidence"),
+                    job.get("visa_confidence"),
                     job.get("match_score"),
                     job.get("match_tier"),
                     job.get("reasoning_summary"),
@@ -344,6 +349,8 @@ class MotherDuckIngestionWriter:
                 company,
                 industry,
                 location,
+                location_normalized,
+                location_group,
                 work_arrangement,
                 employment_type,
                 seniority,
@@ -360,12 +367,15 @@ class MotherDuckIngestionWriter:
                 preferred_skills,
                 all_extracted_skills,
                 visa_signal,
+                visa_status,
+                visa_evidence,
+                visa_confidence,
                 match_score,
                 match_tier,
                 reasoning_summary,
                 inserted_at
             )
-            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )

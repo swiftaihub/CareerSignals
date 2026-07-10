@@ -67,6 +67,8 @@ TABLE_SQL = [
         company varchar,
         industry varchar,
         location varchar,
+        location_normalized varchar,
+        location_group varchar,
         work_arrangement varchar,
         employment_type varchar,
         seniority varchar,
@@ -83,6 +85,9 @@ TABLE_SQL = [
         preferred_skills varchar,
         all_extracted_skills varchar,
         visa_signal varchar,
+        visa_status varchar,
+        visa_evidence varchar,
+        visa_confidence varchar,
         match_score double,
         match_tier varchar,
         reasoning_summary varchar,
@@ -108,6 +113,14 @@ TABLE_SQL = [
     """,
 ]
 
+MIGRATION_SQL = [
+    "alter table staging.python_jobs_processed add column if not exists location_normalized varchar",
+    "alter table staging.python_jobs_processed add column if not exists location_group varchar",
+    "alter table staging.python_jobs_processed add column if not exists visa_status varchar",
+    "alter table staging.python_jobs_processed add column if not exists visa_evidence varchar",
+    "alter table staging.python_jobs_processed add column if not exists visa_confidence varchar",
+]
+
 
 def init_motherduck_schema(service: MotherDuckService | None = None) -> None:
     """Create required MotherDuck schemas and raw/app/bridge tables."""
@@ -117,4 +130,6 @@ def init_motherduck_schema(service: MotherDuckService | None = None) -> None:
         for sql in SCHEMA_SQL:
             conn.execute(sql)
         for sql in TABLE_SQL:
+            conn.execute(sql)
+        for sql in MIGRATION_SQL:
             conn.execute(sql)

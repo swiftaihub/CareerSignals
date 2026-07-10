@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
+from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
@@ -31,17 +33,30 @@ from packages.careersignal_core.repositories.jobs import (
     JobFilters,
     JobRepository,
     PaginatedJobs,
+    PipelineQuotaExceededError,
+    append_pipeline_run_message,
     build_job_repository,
+    complete_pipeline_run_state,
+    fail_pipeline_run_state,
+    get_pipeline_quota,
+    get_pipeline_run_state,
+    reserve_pipeline_run,
     write_operation_state,
 )
 from packages.careersignal_core.settings import dbt_profiles_dir, dbt_project_dir
 from packages.careersignal_core.storage.motherduck import MotherDuckConfigurationError
 from src.main import export_excel_from_current_data, run_pipeline
 
+LOGGER = logging.getLogger(__name__)
+
 
 def _cors_origins() -> list[str]:
     raw_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000")
-    return [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+    origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+    for local_origin in ("http://localhost:3000", "http://127.0.0.1:3000"):
+        if local_origin not in origins:
+            origins.append(local_origin)
+    return origins
 
 
 app = FastAPI(title="CareerSignal API", version="0.1.0")
@@ -85,6 +100,62 @@ def _paginated_response(page: PaginatedJobs) -> dict[str, Any]:
     }
 
 
+def _serialize_summary(summary: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: str(value) if isinstance(value, Path) else value
+        for key, value in summary.items()
+        if key != "jobs"
+    }
+
+
+def _new_pipeline_run_id() -> str:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return f"pipeline_{stamp}_{uuid4().hex[:8]}"
+
+
+class _PipelineLogHandler(logging.Handler):
+    def __init__(self, run_id: str) -> None:
+        super().__init__(level=logging.INFO)
+        self.run_id = run_id
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            level = "error" if record.levelno >= logging.ERROR else "warning" if record.levelno >= logging.WARNING else "info"
+            append_pipeline_run_message(self.run_id, self.format(record), level=level)
+        except Exception:
+            pass
+
+
+def _execute_pipeline_run(run_id: str) -> None:
+    append_pipeline_run_message(run_id, "Loading configuration and job sources")
+    handler = _PipelineLogHandler(run_id)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    loggers = [
+        logging.getLogger("src"),
+        logging.getLogger("packages.careersignal_core"),
+    ]
+    previous_levels = {logger: logger.level for logger in loggers}
+    for logger in loggers:
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+
+    try:
+        summary = run_pipeline(ROOT)
+        serialized_summary = _serialize_summary(summary)
+        write_operation_state(
+            last_pipeline_run_at=_now_iso(),
+            excel_path=str(summary.get("output_path")) if summary.get("output_path") else None,
+        )
+        complete_pipeline_run_state(run_id, serialized_summary)
+    except Exception as exc:
+        LOGGER.exception("Pipeline run %s failed.", run_id)
+        fail_pipeline_run_state(run_id, f"Pipeline failed: {exc}")
+    finally:
+        for logger in loggers:
+            logger.removeHandler(handler)
+            logger.setLevel(previous_levels[logger])
+
+
 @app.exception_handler(MotherDuckConfigurationError)
 def motherduck_configuration_handler(_, exc: MotherDuckConfigurationError):
     return JSONResponse(
@@ -118,14 +189,23 @@ def get_jobs(
     company: str | None = None,
     industry: str | None = None,
     location: str | None = None,
+    location_group: str | None = None,
     work_arrangement: str | None = None,
     visa_signal: str | None = None,
     application_status: str | None = None,
     search: str | None = None,
+    posted_start_date: date | None = Query(default=None),
+    posted_end_date: date | None = Query(default=None),
     sort_by: str = Query(default="match_score"),
     sort_order: str = Query(default="desc"),
     repository: JobRepository = Depends(get_repository),
 ):
+    if posted_start_date and posted_end_date and posted_start_date > posted_end_date:
+        raise _api_error(
+            400,
+            "Posted From must be on or before Posted To.",
+            "INVALID_POSTED_DATE_RANGE",
+        )
     jobs_page = repository.get_jobs(
         JobFilters(
             limit=limit,
@@ -138,15 +218,28 @@ def get_jobs(
             company=company,
             industry=industry,
             location=location,
+            location_group=location_group,
             work_arrangement=work_arrangement,
             visa_signal=visa_signal,
             application_status=application_status,
             search=search,
+            posted_start_date=posted_start_date,
+            posted_end_date=posted_end_date,
             sort_by=sort_by,
             sort_order=sort_order,
         )
     )
     return _paginated_response(jobs_page)
+
+
+@app.get("/api/jobs/filter-options")
+def get_job_filter_options(repository: JobRepository = Depends(get_repository)):
+    return repository.get_filter_options()
+
+
+@app.get("/api/jobs/facets")
+def get_job_facets(repository: JobRepository = Depends(get_repository)):
+    return repository.get_facets()
 
 
 @app.get("/api/jobs/{job_id}")
@@ -207,18 +300,31 @@ def get_dashboard_summary(repository: JobRepository = Depends(get_repository)):
     return repository.get_dashboard_summary()
 
 
-@app.post("/api/pipeline/run")
-def run_pipeline_endpoint():
-    summary = run_pipeline(ROOT)
-    write_operation_state(
-        last_pipeline_run_at=_now_iso(),
-        excel_path=str(summary.get("output_path")) if summary.get("output_path") else None,
-    )
-    return {
-        key: str(value) if isinstance(value, Path) else value
-        for key, value in summary.items()
-        if key != "jobs"
-    }
+@app.post("/api/pipeline/run", status_code=202)
+def run_pipeline_endpoint(background_tasks: BackgroundTasks):
+    run_id = _new_pipeline_run_id()
+    try:
+        run_record = reserve_pipeline_run(run_id)
+    except PipelineQuotaExceededError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "detail": "Daily pipeline refresh limit reached. Refreshes reset at 6:00 AM ET.",
+                "error_code": "PIPELINE_QUOTA_EXCEEDED",
+                "resets_at": exc.quota["resets_at"],
+            },
+        ) from exc
+
+    background_tasks.add_task(_execute_pipeline_run, run_id)
+    return {**run_record, "quota": get_pipeline_quota()}
+
+
+@app.get("/api/pipeline/runs/{run_id}")
+def get_pipeline_run(run_id: str):
+    run_record = get_pipeline_run_state(run_id)
+    if not run_record:
+        raise _api_error(404, "Pipeline run was not found.", "PIPELINE_RUN_NOT_FOUND")
+    return {**run_record, "quota": get_pipeline_quota()}
 
 
 @app.post("/api/excel/export")

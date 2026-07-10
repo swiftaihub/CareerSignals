@@ -9,8 +9,16 @@ import { AppShell } from "@/components/layout/app-shell";
 import { PageHeader } from "@/components/layout/page-header";
 import { ErrorState } from "@/components/shared/error-state";
 import { LoadingState } from "@/components/shared/loading-state";
-import { getJobs, updateJobStatus } from "@/lib/api";
-import type { ApiError, Job, JobFilters as JobFilterValues, PaginatedJobs, SortOrder } from "@/lib/types";
+import { getJobFacets, getJobFilterOptions, getJobs, updateJobStatus } from "@/lib/api";
+import type {
+  ApiError,
+  Job,
+  JobFacets,
+  JobFilterOptions,
+  JobFilters as JobFilterValues,
+  PaginatedJobs,
+  SortOrder
+} from "@/lib/types";
 
 const DEFAULT_FILTERS: JobFilterValues = {
   page: 1,
@@ -19,8 +27,23 @@ const DEFAULT_FILTERS: JobFilterValues = {
   sort_order: "desc"
 };
 
+const EMPTY_FILTER_OPTIONS: JobFilterOptions = {
+  categories: [],
+  companies: [],
+  industries: [],
+  locations: []
+};
+
+const EMPTY_FACETS: JobFacets = {
+  locations: [],
+  location_groups: []
+};
+
 export default function JobsPage() {
   const [filters, setFilters] = useState<JobFilterValues>(DEFAULT_FILTERS);
+  const [filterOptions, setFilterOptions] = useState<JobFilterOptions>(EMPTY_FILTER_OPTIONS);
+  const [facets, setFacets] = useState<JobFacets>(EMPTY_FACETS);
+  const [facetsLoading, setFacetsLoading] = useState(true);
   const [data, setData] = useState<PaginatedJobs | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ApiError | Error | null>(null);
@@ -43,6 +66,16 @@ export default function JobsPage() {
   useEffect(() => {
     loadJobs();
   }, [loadJobs]);
+
+  useEffect(() => {
+    Promise.all([getJobFilterOptions(), getJobFacets()])
+      .then(([nextFilterOptions, nextFacets]) => {
+        setFilterOptions(nextFilterOptions);
+        setFacets(nextFacets);
+      })
+      .catch((requestError) => setError(requestError as ApiError))
+      .finally(() => setFacetsLoading(false));
+  }, []);
 
   function selectJob(job: Job) {
     setSelectedJob(job);
@@ -99,7 +132,10 @@ export default function JobsPage() {
       />
 
       <JobFilters
+        facets={facets}
+        facetsLoading={facetsLoading}
         filters={filters}
+        options={filterOptions}
         onChange={setFilters}
         onReset={() => setFilters(DEFAULT_FILTERS)}
       />

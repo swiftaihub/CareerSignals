@@ -18,6 +18,8 @@ select
     jobs.company,
     jobs.industry,
     jobs.location,
+    jobs.location_normalized,
+    jobs.location_group,
     jobs.work_arrangement,
     jobs.seniority,
     jobs.employment_type,
@@ -26,6 +28,16 @@ select
     jobs.salary_max,
     jobs.salary_midpoint,
     jobs.visa_signal,
+    coalesce(
+        jobs.visa_status,
+        case
+            when jobs.visa_signal = 'Positive' then 'Sponsorship Available'
+            when jobs.visa_signal = 'Negative' then 'No Sponsorship'
+            else 'Unknown'
+        end
+    ) as visa_status,
+    jobs.visa_evidence,
+    coalesce(jobs.visa_confidence, 'Low') as visa_confidence,
     jobs.required_skills,
     jobs.preferred_skills,
     jobs.all_extracted_skills,

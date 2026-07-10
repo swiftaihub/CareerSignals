@@ -1,53 +1,97 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Database, Download, FileSpreadsheet, Play, TestTube2 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Download, FileSpreadsheet, Play, RefreshCcw } from "lucide-react";
 
 import { MetricCard } from "@/components/dashboard/metric-card";
 import { AppShell } from "@/components/layout/app-shell";
 import { PageHeader } from "@/components/layout/page-header";
-import { DataStatusBadge } from "@/components/shared/data-status-badge";
 import { ErrorState } from "@/components/shared/error-state";
 import { LoadingState } from "@/components/shared/loading-state";
 import { SectionCard } from "@/components/shared/section-card";
+import { PipelineQuotaCard } from "@/components/settings/pipeline-quota-card";
+import { PipelineRunTimeline } from "@/components/settings/pipeline-run-timeline";
 import {
   exportExcel,
   getDataStatus,
   getExcelDownloadUrl,
-  runDbt,
-  runPipeline,
-  testDbt
+  getPipelineRun,
+  runPipeline
 } from "@/lib/api";
-import { formatDate, formatNullable } from "@/lib/formatters";
-import type { ActionResponse, ApiError, DataStatus } from "@/lib/types";
+import { formatDateTime, formatNullable } from "@/lib/formatters";
+import type { ActionResponse, ApiError, DataStatus, PipelineRunStatus } from "@/lib/types";
 
-type ActionName = "pipeline" | "dbt" | "dbtTest" | "excel";
+type ActionName = "pipeline" | "excel";
 
 export default function SettingsPage() {
   const [status, setStatus] = useState<DataStatus | null>(null);
+  const [activeRun, setActiveRun] = useState<PipelineRunStatus | null>(null);
   const [loading, setLoading] = useState(true);
-  const [fullRefresh, setFullRefresh] = useState(false);
   const [runningAction, setRunningAction] = useState<ActionName | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState<ApiError | Error | null>(null);
+  const activeRunId = activeRun?.run_id;
+  const activeRunStatus = activeRun?.status;
 
-  async function refreshStatus() {
-    setStatus(await getDataStatus());
-  }
+  const refreshStatus = useCallback(async () => {
+    const nextStatus = await getDataStatus();
+    setStatus(nextStatus);
+    return nextStatus;
+  }, []);
 
   useEffect(() => {
     refreshStatus()
       .catch((requestError) => setError(requestError as ApiError))
       .finally(() => setLoading(false));
-  }, []);
+  }, [refreshStatus]);
 
-  async function runAction(label: string, actionName: ActionName, action: () => Promise<ActionResponse>) {
-    setRunningAction(actionName);
-    setMessage(`${label} running...`);
+  useEffect(() => {
+    if (!activeRunId || activeRunStatus !== "running") {
+      return;
+    }
+
+    const interval = window.setInterval(async () => {
+      try {
+        const nextRun = await getPipelineRun(activeRunId);
+        setActiveRun(nextRun);
+        if (nextRun.quota) {
+          setStatus((current) => current ? { ...current, pipeline_quota: nextRun.quota } : current);
+        }
+        if (nextRun.status !== "running") {
+          await refreshStatus();
+        }
+      } catch (requestError) {
+        setError(requestError as ApiError);
+      }
+    }, 1500);
+
+    return () => window.clearInterval(interval);
+  }, [activeRunId, activeRunStatus, refreshStatus]);
+
+  async function startPipeline() {
+    setRunningAction("pipeline");
+    setMessage("");
+    setError(null);
+    try {
+      const run = await runPipeline();
+      setActiveRun(run);
+      if (run.quota) {
+        setStatus((current) => current ? { ...current, pipeline_quota: run.quota } : current);
+      }
+    } catch (requestError) {
+      setError(requestError as ApiError);
+    } finally {
+      setRunningAction(null);
+    }
+  }
+
+  async function runExcelExport(action: () => Promise<ActionResponse>) {
+    setRunningAction("excel");
+    setMessage("Preparing Excel export...");
     setError(null);
     try {
       await action();
-      setMessage(`${label} completed.`);
+      setMessage("Excel export completed.");
       await refreshStatus();
     } catch (requestError) {
       setMessage("");
@@ -57,113 +101,104 @@ export default function SettingsPage() {
     }
   }
 
+  const quota = status?.pipeline_quota;
+  const quotaRemaining = quota?.remaining ?? 0;
+  const pipelineRunning = activeRun?.status === "running";
+  const disablePipeline = Boolean(runningAction || pipelineRunning || quotaRemaining <= 0);
+
   return (
     <AppShell>
       <PageHeader
         eyebrow="Settings"
         title="Operational control center"
-        description="Run data refreshes, rebuild dbt marts, export Excel, and inspect the active repository mode without exposing secrets to the browser."
-        action={<DataStatusBadge status={status} />}
+        description="Refresh the job intelligence pipeline, monitor progress, and export the latest workbook without exposing warehouse details."
+        action={
+          <div className="badge border-teal-200 bg-teal-50 text-teal-800">
+            {quotaRemaining === 1 ? "1 refresh available" : `${quotaRemaining} refreshes available`}
+          </div>
+        }
       />
 
-      {loading ? <LoadingState label="Loading data status..." /> : null}
-      {error ? <ErrorState error={error} /> : null}
+      {loading ? <LoadingState label="Loading operational status..." /> : null}
+      {error ? <ErrorState error={error} title="Operation failed" /> : null}
 
       {status ? (
         <>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <MetricCard icon={<Database className="h-5 w-5" />} label="Data Mode" value={formatNullable(status.data_mode)} />
-            <MetricCard label="MotherDuck Database" value={formatNullable(status.motherduck_database || status.database)} />
-            <MetricCard label="Mart Tables" value={status.mart_tables_available ? "Available" : "Pending"} />
-            <MetricCard label="Excel Exists" value={status.excel_exists ? "Yes" : "No"} />
-            <MetricCard label="Last Pipeline Run" value={formatDate(status.last_pipeline_run_at || status.last_pipeline_run)} />
-            <MetricCard label="Last dbt Run" value={formatDate(status.last_dbt_run_at || status.last_dbt_run)} />
-            <MetricCard label="Last dbt Test" value={formatDate(status.last_dbt_test_at)} />
-            <MetricCard label="Latest Run Status" value={formatNullable(status.latest_run_status)} />
+            <MetricCard
+              icon={<RefreshCcw className="h-5 w-5" />}
+              label="Refreshes Remaining"
+              value={String(quotaRemaining)}
+            />
+            <MetricCard
+              label="Last Pipeline Run"
+              value={formatDateTime(status.last_pipeline_run_at || status.last_pipeline_run)}
+            />
+            <MetricCard
+              label="Latest Run Status"
+              value={formatNullable(status.latest_run_status || activeRun?.status)}
+            />
+            <MetricCard
+              label="Excel Workbook"
+              value={status.excel_exists ? "Available" : "Not ready"}
+            />
           </div>
 
-          <div className="mt-6 grid gap-6 xl:grid-cols-[1fr_0.9fr]">
-            <SectionCard title="Pipeline Actions" description="These actions call FastAPI endpoints. Long runs may take a moment.">
-              <div className="grid gap-3 md:grid-cols-2">
-                <button
-                  className="btn btn-primary justify-start"
-                  disabled={Boolean(runningAction)}
-                  type="button"
-                  onClick={() => runAction("Pipeline", "pipeline", runPipeline)}
-                >
-                  <Play className="h-4 w-4" />
-                  Run Pipeline
-                </button>
-                <button
-                  className="btn justify-start"
-                  disabled={Boolean(runningAction)}
-                  type="button"
-                  onClick={() => runAction("dbt Models", "dbt", () => runDbt(fullRefresh))}
-                >
-                  <Database className="h-4 w-4" />
-                  Run dbt Models
-                </button>
-                <button
-                  className="btn justify-start"
-                  disabled={Boolean(runningAction)}
-                  type="button"
-                  onClick={() => runAction("dbt Tests", "dbtTest", testDbt)}
-                >
-                  <TestTube2 className="h-4 w-4" />
-                  Run dbt Tests
-                </button>
-                <button
-                  className="btn justify-start"
-                  disabled={Boolean(runningAction)}
-                  type="button"
-                  onClick={() => runAction("Excel Export", "excel", exportExcel)}
-                >
-                  <FileSpreadsheet className="h-4 w-4" />
-                  Export Excel
-                </button>
-              </div>
-              <label className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
-                <input
-                  checked={fullRefresh}
-                  className="h-4 w-4"
-                  type="checkbox"
-                  onChange={(event) => setFullRefresh(event.target.checked)}
-                />
-                Run dbt with full refresh
-              </label>
-              <div className="mt-4 flex flex-wrap items-center gap-3">
-                <a
-                  className="btn"
-                  href={getExcelDownloadUrl()}
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  <Download className="h-4 w-4" />
-                  Download Excel
-                </a>
-                {message ? <span className="text-sm font-medium text-primary">{message}</span> : null}
-              </div>
-            </SectionCard>
+          <div className="mt-6 grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
+            <div className="space-y-6">
+              <PipelineQuotaCard quota={quota} />
 
-            <SectionCard title="Runtime Metadata">
-              <dl className="grid gap-3 text-sm">
-                {[
-                  ["Excel Path", status.excel_path],
-                  ["Excel Source", status.excel_source],
-                  ["dbt Project Dir", status.dbt_project_dir],
-                  ["dbt Profiles Dir", status.dbt_profiles_dir],
-                  ["Local Mode Available", status.local_mode_available ? "Yes" : "No"],
-                  ["MotherDuck Mode Available", status.motherduck_mode_available ? "Yes" : "No"],
-                  ["Configured Sources", status.configured_sources?.join(", ")],
-                  ["Job Categories", status.job_sources?.join(", ")]
-                ].map(([label, value]) => (
-                  <div key={label} className="rounded-md border border-border bg-background p-3">
-                    <dt className="text-xs font-semibold uppercase text-muted-foreground">{label}</dt>
-                    <dd className="mt-1 break-words text-foreground">{formatNullable(value)}</dd>
-                  </div>
-                ))}
-              </dl>
-            </SectionCard>
+              <SectionCard
+                title="Pipeline Actions"
+                description="Run at most two refreshes per quota window. Refreshes reset every day at 6:00 AM ET."
+              >
+                <div className="grid gap-3">
+                  <button
+                    className="btn btn-primary justify-start"
+                    disabled={disablePipeline}
+                    type="button"
+                    onClick={startPipeline}
+                  >
+                    <Play className="h-4 w-4" />
+                    Run Pipeline
+                  </button>
+                  {quotaRemaining <= 0 ? (
+                    <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                      0 refreshes available - resets at 6:00 AM ET.
+                    </p>
+                  ) : null}
+                </div>
+              </SectionCard>
+
+              <SectionCard
+                title="Excel Export"
+                description="Create or download the latest workbook for offline review."
+              >
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    className="btn justify-start"
+                    disabled={Boolean(runningAction)}
+                    type="button"
+                    onClick={() => runExcelExport(exportExcel)}
+                  >
+                    <FileSpreadsheet className="h-4 w-4" />
+                    Export Excel
+                  </button>
+                  <a
+                    className={`btn ${status.excel_exists ? "" : "pointer-events-none opacity-60"}`}
+                    href={getExcelDownloadUrl()}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    <Download className="h-4 w-4" />
+                    Download Excel
+                  </a>
+                </div>
+                {message ? <p className="mt-3 text-sm font-medium text-primary">{message}</p> : null}
+              </SectionCard>
+            </div>
+
+            <PipelineRunTimeline run={activeRun} />
           </div>
         </>
       ) : null}
