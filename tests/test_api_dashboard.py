@@ -1,15 +1,23 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi.testclient import TestClient
+import pandas as pd
+import pytest
 
 from apps.api.main import app, get_repository
 from packages.careersignal_core.repositories.jobs import (
     JobFilters,
     JobRepository,
     PaginatedJobs,
+    PipelineQuotaExceededError,
     _apply_local_filters,
+    _records,
+    get_pipeline_quota,
+    reserve_pipeline_run,
 )
 
 
@@ -31,6 +39,7 @@ JOBS = [
         "all_extracted_skills": ["Python", "SQL", "dbt", "Spark"],
         "reasoning_summary": "Strong data-product fit.",
         "application_status": "Not Applied",
+        "date_posted": "2026-07-08",
     },
     {
         "job_id": "job-2",
@@ -49,6 +58,7 @@ JOBS = [
         "all_extracted_skills": ["SQL", "Power BI"],
         "reasoning_summary": "Banking analytics role.",
         "application_status": "Saved",
+        "date_posted": "2026-06-30",
     },
 ]
 
@@ -87,6 +97,14 @@ class FakeRepository(JobRepository):
             "application_status": application_status,
             "notes": notes,
             "updated_at": "2026-07-08T12:00:00Z",
+        }
+
+    def get_filter_options(self) -> dict[str, list[str]]:
+        return {
+            "categories": sorted({job["category_name"] for job in self.jobs}),
+            "companies": sorted({job["company"] for job in self.jobs}),
+            "industries": sorted({job["industry"] for job in self.jobs}),
+            "locations": sorted({job["location"] for job in self.jobs}),
         }
 
     def get_top_matches(self) -> list[dict[str, Any]]:
@@ -146,6 +164,57 @@ def test_jobs_endpoint_supports_filtering_sorting_and_pagination() -> None:
     assert repository.last_filters.search == "python"
 
 
+def test_jobs_endpoint_supports_posted_date_filtering() -> None:
+    repository = FakeRepository()
+    app.dependency_overrides[get_repository] = lambda: repository
+    client = TestClient(app)
+
+    response = client.get(
+        "/api/jobs",
+        params={
+            "posted_start_date": "2026-07-01",
+            "posted_end_date": "2026-07-09",
+        },
+    )
+
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 1
+    assert payload["items"][0]["job_id"] == "job-1"
+
+
+def test_jobs_endpoint_rejects_invalid_posted_date_range() -> None:
+    app.dependency_overrides[get_repository] = lambda: FakeRepository()
+    client = TestClient(app)
+
+    response = client.get(
+        "/api/jobs",
+        params={
+            "posted_start_date": "2026-07-10",
+            "posted_end_date": "2026-07-09",
+        },
+    )
+
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["error_code"] == "INVALID_POSTED_DATE_RANGE"
+
+
+def test_job_filter_options_endpoint() -> None:
+    app.dependency_overrides[get_repository] = lambda: FakeRepository()
+    client = TestClient(app)
+
+    response = client.get("/api/jobs/filter-options")
+
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["companies"] == ["Alpha Data", "Beta Bank"]
+
+
 def test_job_detail_and_status_update() -> None:
     app.dependency_overrides[get_repository] = lambda: FakeRepository()
     client = TestClient(app)
@@ -198,3 +267,47 @@ def test_local_filtering_logic() -> None:
     )
 
     assert [job["job_id"] for job in filtered] == ["job-1"]
+
+
+def test_records_convert_pandas_missing_scalars_to_json_none() -> None:
+    rows = _records(
+        pd.DataFrame(
+            [
+                {
+                    "Job ID": "job-missing",
+                    "Match Score": 92.0,
+                    "notes": float("nan"),
+                    "application_updated_at": pd.NaT,
+                }
+            ]
+        )
+    )
+
+    assert rows[0]["notes"] is None
+    assert rows[0]["application_updated_at"] is None
+
+
+def test_pipeline_quota_allows_two_runs_per_window(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("CAREERSIGNAL_OUTPUT_DIR", str(tmp_path))
+
+    reserve_pipeline_run("pipeline-test-1")
+    reserve_pipeline_run("pipeline-test-2")
+    quota = get_pipeline_quota()
+
+    assert quota["limit"] == 2
+    assert quota["remaining"] == 0
+    with pytest.raises(PipelineQuotaExceededError):
+        reserve_pipeline_run("pipeline-test-3")
+
+
+def test_pipeline_quota_window_resets_at_6am_eastern(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("CAREERSIGNAL_OUTPUT_DIR", str(tmp_path))
+    eastern = ZoneInfo("America/New_York")
+
+    before_reset = get_pipeline_quota(datetime(2026, 7, 9, 5, 59, tzinfo=eastern))
+    after_reset = get_pipeline_quota(datetime(2026, 7, 9, 6, 0, tzinfo=eastern))
+
+    assert before_reset["window_start"].startswith("2026-07-08T06:00:00")
+    assert before_reset["window_end"].startswith("2026-07-09T06:00:00")
+    assert after_reset["window_start"].startswith("2026-07-09T06:00:00")
+    assert after_reset["window_end"].startswith("2026-07-10T06:00:00")

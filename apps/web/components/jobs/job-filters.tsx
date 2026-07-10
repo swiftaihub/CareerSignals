@@ -1,10 +1,13 @@
 "use client";
 
+import { DateRangeFilter } from "@/components/jobs/date-range-filter";
+import { FilterSelect } from "@/components/jobs/filter-select";
 import { APPLICATION_STATUSES, JOB_SORT_OPTIONS, VISA_SIGNALS, WORK_ARRANGEMENTS } from "@/lib/constants";
-import type { JobFilters as JobFilterValues } from "@/lib/types";
+import type { JobFilterOptions, JobFilters as JobFilterValues } from "@/lib/types";
 
 interface JobFiltersProps {
   filters: JobFilterValues;
+  options: JobFilterOptions;
   onChange: (filters: JobFilterValues) => void;
   onReset: () => void;
 }
@@ -24,7 +27,7 @@ function updateValue(
   onChange({ ...filters, page: 1, [key]: parsedValue });
 }
 
-export function JobFilters({ filters, onChange, onReset }: JobFiltersProps) {
+export function JobFilters({ filters, options, onChange, onReset }: JobFiltersProps) {
   return (
     <div className="rounded-lg border border-border bg-card p-4 shadow-soft">
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -37,87 +40,52 @@ export function JobFilters({ filters, onChange, onReset }: JobFiltersProps) {
             onChange={(event) => updateValue(filters, "search", event.target.value, onChange)}
           />
         </label>
-        <label className="space-y-1 text-xs font-semibold uppercase text-muted-foreground">
-          Category
-          <input
-            className="input normal-case"
-            placeholder="Analytics Engineer"
-            value={filters.category_name || ""}
-            onChange={(event) => updateValue(filters, "category_name", event.target.value, onChange)}
-          />
-        </label>
-        <label className="space-y-1 text-xs font-semibold uppercase text-muted-foreground">
-          Company
-          <input
-            className="input normal-case"
-            placeholder="Company name"
-            value={filters.company || ""}
-            onChange={(event) => updateValue(filters, "company", event.target.value, onChange)}
-          />
-        </label>
-        <label className="space-y-1 text-xs font-semibold uppercase text-muted-foreground">
-          Industry
-          <input
-            className="input normal-case"
-            placeholder="SaaS, banking..."
-            value={filters.industry || ""}
-            onChange={(event) => updateValue(filters, "industry", event.target.value, onChange)}
-          />
-        </label>
-        <label className="space-y-1 text-xs font-semibold uppercase text-muted-foreground">
-          Location
-          <input
-            className="input normal-case"
-            placeholder="Remote, New York..."
-            value={filters.location || ""}
-            onChange={(event) => updateValue(filters, "location", event.target.value, onChange)}
-          />
-        </label>
-        <label className="space-y-1 text-xs font-semibold uppercase text-muted-foreground">
-          Work Arrangement
-          <select
-            className="select normal-case"
-            value={filters.work_arrangement || ""}
-            onChange={(event) => updateValue(filters, "work_arrangement", event.target.value, onChange)}
-          >
-            <option value="">Any</option>
-            {WORK_ARRANGEMENTS.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="space-y-1 text-xs font-semibold uppercase text-muted-foreground">
-          Visa Signal
-          <select
-            className="select normal-case"
-            value={filters.visa_signal || ""}
-            onChange={(event) => updateValue(filters, "visa_signal", event.target.value, onChange)}
-          >
-            <option value="">Any</option>
-            {VISA_SIGNALS.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="space-y-1 text-xs font-semibold uppercase text-muted-foreground">
-          Application Status
-          <select
-            className="select normal-case"
-            value={filters.application_status || ""}
-            onChange={(event) => updateValue(filters, "application_status", event.target.value, onChange)}
-          >
-            <option value="">Any</option>
-            {APPLICATION_STATUSES.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </label>
+        <FilterSelect
+          label="Category"
+          options={options.categories}
+          placeholder="Any category"
+          value={filters.category_name}
+          onChange={(value) => updateValue(filters, "category_name", value, onChange)}
+        />
+        <FilterSelect
+          label="Company"
+          options={options.companies}
+          placeholder="Any company"
+          value={filters.company}
+          onChange={(value) => updateValue(filters, "company", value, onChange)}
+        />
+        <FilterSelect
+          label="Industry"
+          options={options.industries}
+          placeholder="Any industry"
+          value={filters.industry}
+          onChange={(value) => updateValue(filters, "industry", value, onChange)}
+        />
+        <FilterSelect
+          label="Location"
+          options={options.locations}
+          placeholder="Any location"
+          value={filters.location}
+          onChange={(value) => updateValue(filters, "location", value, onChange)}
+        />
+        <FilterSelect
+          label="Work"
+          options={WORK_ARRANGEMENTS}
+          value={filters.work_arrangement}
+          onChange={(value) => updateValue(filters, "work_arrangement", value, onChange)}
+        />
+        <FilterSelect
+          label="Visa"
+          options={VISA_SIGNALS}
+          value={filters.visa_signal}
+          onChange={(value) => updateValue(filters, "visa_signal", value, onChange)}
+        />
+        <FilterSelect
+          label="Status"
+          options={APPLICATION_STATUSES}
+          value={filters.application_status}
+          onChange={(value) => updateValue(filters, "application_status", value, onChange)}
+        />
         <label className="space-y-1 text-xs font-semibold uppercase text-muted-foreground">
           Min Score
           <input
@@ -167,6 +135,15 @@ export function JobFilters({ filters, onChange, onReset }: JobFiltersProps) {
             <option value="asc">Ascending</option>
           </select>
         </label>
+      </div>
+      <div className="mt-4 border-t border-border pt-4">
+        <DateRangeFilter
+          endDate={filters.posted_end_date}
+          startDate={filters.posted_start_date}
+          onEndDateChange={(value) => updateValue(filters, "posted_end_date", value, onChange)}
+          onReset={() => onChange({ ...filters, page: 1, posted_end_date: undefined, posted_start_date: undefined })}
+          onStartDateChange={(value) => updateValue(filters, "posted_start_date", value, onChange)}
+        />
       </div>
       <div className="mt-3 flex justify-end">
         <button className="btn" type="button" onClick={onReset}>

@@ -1,23 +1,17 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
-import {
-  type ColumnDef,
-  flexRender,
-  getCoreRowModel,
-  useReactTable
-} from "@tanstack/react-table";
-import { ArrowDownUp, Eye } from "lucide-react";
+import { useCallback, useState } from "react";
+import { ArrowDownUp, ExternalLink, Eye } from "lucide-react";
 
 import { ApplicationStatusSelect } from "@/components/jobs/application-status-select";
-import { JobLinkButtons } from "@/components/jobs/job-link-buttons";
 import { MatchScoreBadge } from "@/components/jobs/match-score-badge";
 import { VisaSignalBadge } from "@/components/jobs/visa-signal-badge";
 import { EmptyState } from "@/components/shared/empty-state";
 import { formatCurrency, formatDate, formatNullable } from "@/lib/formatters";
+import { cn } from "@/lib/utils";
 import type { Job, SortOrder } from "@/lib/types";
 
-interface JobsTableProps {
+interface ResponsiveJobsTableProps {
   jobs: Job[];
   total: number;
   page: number;
@@ -30,24 +24,130 @@ interface JobsTableProps {
   onStatusChange: (job: Job, status: string) => Promise<void>;
 }
 
-function HeaderButton({
+const columns = [
+  { label: "Score", width: "w-[6%]", sort: "match_score" },
+  { label: "Role", width: "w-[18%]", sort: "job_title" },
+  { label: "Company", width: "w-[9%]", sort: "company" },
+  { label: "Category", width: "w-[9%]", sort: "category_name" },
+  { label: "Industry", width: "w-[7%]" },
+  { label: "Location", width: "w-[9%]" },
+  { label: "Work", width: "w-[6%]" },
+  { label: "Salary", width: "w-[8%]", sort: "salary_midpoint" },
+  { label: "Visa", width: "w-[6%]" },
+  { label: "Status", width: "w-[9%]" },
+  { label: "Posted", width: "w-[7%]", sort: "date_posted" },
+  { label: "Actions", width: "w-[6%]" }
+];
+
+function SortableHeader({
   label,
   column,
+  active,
   onSort
 }: {
   label: string;
-  column: string;
+  column?: string;
+  active?: boolean;
   onSort: (column: string) => void;
 }) {
+  if (!column) {
+    return <span>{label}</span>;
+  }
+
   return (
-    <button className="inline-flex items-center gap-1 text-left" type="button" onClick={() => onSort(column)}>
-      {label}
-      <ArrowDownUp className="h-3 w-3" />
+    <button
+      className={cn(
+        "inline-flex max-w-full items-center gap-1 text-left",
+        active ? "text-foreground" : "text-muted-foreground"
+      )}
+      type="button"
+      onClick={() => onSort(column)}
+    >
+      <span className="truncate">{label}</span>
+      <ArrowDownUp className="h-3 w-3 shrink-0" />
     </button>
   );
 }
 
-export function JobsTable({
+function TruncatedText({
+  value,
+  className
+}: {
+  value?: string | number | boolean | null;
+  className?: string;
+}) {
+  const label = formatNullable(value);
+  return (
+    <span className={cn("block truncate", className)} title={label}>
+      {label}
+    </span>
+  );
+}
+
+function WorkBadge({ value }: { value?: string | null }) {
+  return (
+    <span className="badge max-w-full truncate border-sky-200 bg-sky-50 text-sky-800" title={formatNullable(value)}>
+      {formatNullable(value)}
+    </span>
+  );
+}
+
+function ActionButtons({ job, onSelectJob }: { job: Job; onSelectJob: (job: Job) => void }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <button
+        className="btn h-8 w-8 p-0"
+        title="View details"
+        type="button"
+        onClick={() => onSelectJob(job)}
+      >
+        <Eye className="h-3.5 w-3.5" />
+        <span className="sr-only">View details</span>
+      </button>
+      {job.jd_post_link ? (
+        <a
+          className="btn h-8 w-8 p-0"
+          href={job.jd_post_link}
+          rel="noreferrer"
+          target="_blank"
+          title="Open job description"
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+          <span className="sr-only">Open job description</span>
+        </a>
+      ) : null}
+      {job.apply_link ? (
+        <a
+          className="btn btn-primary h-8 w-8 p-0"
+          href={job.apply_link}
+          rel="noreferrer"
+          target="_blank"
+          title="Open application"
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+          <span className="sr-only">Open application</span>
+        </a>
+      ) : null}
+    </div>
+  );
+}
+
+function JobField({
+  label,
+  value
+}: {
+  label: string;
+  value?: string | number | boolean | null;
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="text-xs font-semibold uppercase text-muted-foreground">{label}</div>
+      <TruncatedText className="mt-1 text-sm text-foreground" value={value} />
+    </div>
+  );
+}
+
+export function ResponsiveJobsTable({
   jobs,
   total,
   page,
@@ -58,7 +158,7 @@ export function JobsTable({
   onPageChange,
   onSelectJob,
   onStatusChange
-}: JobsTableProps) {
+}: ResponsiveJobsTableProps) {
   const [updatingJobId, setUpdatingJobId] = useState<string | null>(null);
   const pageCount = Math.max(Math.ceil(total / pageSize), 1);
 
@@ -76,141 +176,133 @@ export function JobsTable({
     }
   }, [onStatusChange]);
 
-  const columns = useMemo<ColumnDef<Job>[]>(
-    () => [
-      {
-        id: "match_score",
-        header: () => <HeaderButton label="Score" column="match_score" onSort={requestSort} />,
-        cell: ({ row }) => (
-          <MatchScoreBadge score={row.original.match_score} tier={row.original.match_tier} />
-        )
-      },
-      {
-        id: "job_title",
-        header: () => <HeaderButton label="Role" column="job_title" onSort={requestSort} />,
-        cell: ({ row }) => (
-          <button
-            className="text-left font-semibold text-foreground hover:text-primary"
-            type="button"
-            onClick={() => onSelectJob(row.original)}
-          >
-            {formatNullable(row.original.job_title)}
-          </button>
-        )
-      },
-      {
-        id: "company",
-        header: () => <HeaderButton label="Company" column="company" onSort={requestSort} />,
-        cell: ({ row }) => formatNullable(row.original.company)
-      },
-      {
-        id: "category_name",
-        header: () => <HeaderButton label="Category" column="category_name" onSort={requestSort} />,
-        cell: ({ row }) => (
-          <span className="text-xs text-muted-foreground">{formatNullable(row.original.category_name)}</span>
-        )
-      },
-      {
-        id: "industry",
-        header: "Industry",
-        cell: ({ row }) => formatNullable(row.original.industry)
-      },
-      {
-        id: "location",
-        header: "Location",
-        cell: ({ row }) => formatNullable(row.original.location)
-      },
-      {
-        id: "work_arrangement",
-        header: "Work",
-        cell: ({ row }) => formatNullable(row.original.work_arrangement)
-      },
-      {
-        id: "salary_midpoint",
-        header: () => <HeaderButton label="Salary" column="salary_midpoint" onSort={requestSort} />,
-        cell: ({ row }) => formatCurrency(row.original.salary_midpoint)
-      },
-      {
-        id: "visa_signal",
-        header: "Visa",
-        cell: ({ row }) => <VisaSignalBadge signal={row.original.visa_signal} />
-      },
-      {
-        id: "application_status",
-        header: "Status",
-        cell: ({ row }) => (
-          <ApplicationStatusSelect
-            disabled={updatingJobId === row.original.job_id}
-            value={row.original.application_status}
-            onChange={(value) => updateStatus(row.original, value)}
-          />
-        )
-      },
-      {
-        id: "date_posted",
-        header: () => <HeaderButton label="Posted" column="date_posted" onSort={requestSort} />,
-        cell: ({ row }) => formatDate(row.original.date_posted)
-      },
-      {
-        id: "source",
-        header: "Source",
-        cell: ({ row }) => formatNullable(row.original.source)
-      },
-      {
-        id: "actions",
-        header: "Actions",
-        cell: ({ row }) => (
-          <div className="flex min-w-32 flex-wrap items-center gap-2">
-            <button className="btn h-8 px-3 text-xs" type="button" onClick={() => onSelectJob(row.original)}>
-              <Eye className="h-3.5 w-3.5" />
-              Details
-            </button>
-            <JobLinkButtons job={row.original} />
-          </div>
-        )
-      }
-    ],
-    [onSelectJob, requestSort, updateStatus, updatingJobId]
-  );
-
-  const table = useReactTable({
-    data: jobs,
-    columns,
-    getCoreRowModel: getCoreRowModel()
-  });
-
   if (!jobs.length) {
     return <EmptyState title="No jobs match these filters" />;
   }
 
   return (
     <div className="space-y-3">
-      <div className="table-shell overflow-x-auto">
-        <table className="data-table min-w-[1280px]">
-          <thead>
-            {table.getHeaderGroups().map((headerGroup) => (
-              <tr key={headerGroup.id}>
-                {headerGroup.headers.map((header) => (
-                  <th key={header.id}>
-                    {header.isPlaceholder
-                      ? null
-                      : flexRender(header.column.columnDef.header, header.getContext())}
+      <div className="hidden xl:block">
+        <div className="table-shell">
+          <table className="data-table table-fixed">
+            <colgroup>
+              {columns.map((column) => (
+                <col key={column.label} className={column.width} />
+              ))}
+            </colgroup>
+            <thead>
+              <tr>
+                {columns.map((column) => (
+                  <th key={column.label}>
+                    <SortableHeader
+                      active={sortBy === column.sort}
+                      column={column.sort}
+                      label={column.label}
+                      onSort={requestSort}
+                    />
                   </th>
                 ))}
               </tr>
-            ))}
-          </thead>
-          <tbody>
-            {table.getRowModel().rows.map((row) => (
-              <tr key={row.original.job_id} className="hover:bg-muted/40">
-                {row.getVisibleCells().map((cell) => (
-                  <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {jobs.map((job) => (
+                <tr key={job.job_id} className="hover:bg-muted/40">
+                  <td>
+                    <MatchScoreBadge compact score={job.match_score} tier={job.match_tier} />
+                  </td>
+                  <td className="max-w-0">
+                    <button
+                      className="block max-w-full truncate text-left font-semibold text-foreground hover:text-primary"
+                      title={formatNullable(job.job_title)}
+                      type="button"
+                      onClick={() => onSelectJob(job)}
+                    >
+                      {formatNullable(job.job_title)}
+                    </button>
+                  </td>
+                  <td className="max-w-0">
+                    <TruncatedText value={job.company} />
+                  </td>
+                  <td className="max-w-0">
+                    <TruncatedText className="text-xs text-muted-foreground" value={job.category_name} />
+                  </td>
+                  <td className="max-w-0">
+                    <TruncatedText value={job.industry} />
+                  </td>
+                  <td className="max-w-0">
+                    <TruncatedText value={job.location} />
+                  </td>
+                  <td>
+                    <WorkBadge value={job.work_arrangement} />
+                  </td>
+                  <td className="whitespace-nowrap">{formatCurrency(job.salary_midpoint)}</td>
+                  <td>
+                    <VisaSignalBadge signal={job.visa_signal} />
+                  </td>
+                  <td>
+                    <ApplicationStatusSelect
+                      className="w-full min-w-0 px-2"
+                      disabled={updatingJobId === job.job_id}
+                      value={job.application_status}
+                      onChange={(value) => updateStatus(job, value)}
+                    />
+                  </td>
+                  <td className="whitespace-nowrap">{formatDate(job.date_posted)}</td>
+                  <td>
+                    <ActionButtons job={job} onSelectJob={onSelectJob} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
+
+      <div className="grid gap-3 xl:hidden">
+        {jobs.map((job) => (
+          <article key={job.job_id} className="rounded-lg border border-border bg-card p-4 shadow-soft">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap gap-2">
+                  <MatchScoreBadge compact score={job.match_score} tier={job.match_tier} />
+                  <VisaSignalBadge signal={job.visa_signal} />
+                  <WorkBadge value={job.work_arrangement} />
+                </div>
+                <button
+                  className="mt-3 block max-w-full truncate text-left text-base font-semibold text-foreground hover:text-primary"
+                  title={formatNullable(job.job_title)}
+                  type="button"
+                  onClick={() => onSelectJob(job)}
+                >
+                  {formatNullable(job.job_title)}
+                </button>
+                <p className="mt-1 truncate text-sm text-muted-foreground" title={formatNullable(job.company)}>
+                  {formatNullable(job.company)}
+                </p>
+              </div>
+              <ActionButtons job={job} onSelectJob={onSelectJob} />
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <JobField label="Category" value={job.category_name} />
+              <JobField label="Industry" value={job.industry} />
+              <JobField label="Location" value={job.location} />
+              <JobField label="Salary" value={formatCurrency(job.salary_midpoint)} />
+              <JobField label="Posted" value={formatDate(job.date_posted)} />
+              <div>
+                <div className="text-xs font-semibold uppercase text-muted-foreground">Status</div>
+                <ApplicationStatusSelect
+                  className="mt-1 w-full"
+                  disabled={updatingJobId === job.job_id}
+                  value={job.application_status}
+                  onChange={(value) => updateStatus(job, value)}
+                />
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
+
       <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
         <div>
           Showing page {page} of {pageCount} ({total} jobs)
@@ -232,3 +324,5 @@ export function JobsTable({
     </div>
   );
 }
+
+export const JobsTable = ResponsiveJobsTable;

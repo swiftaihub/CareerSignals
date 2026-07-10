@@ -5,12 +5,14 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 import json
 import os
 from pathlib import Path
 import re
+import threading
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -29,6 +31,9 @@ from src.utils.hashing import stable_hash
 
 PERSONAL_USER_ID = "personal_user"
 TOP_MATCH_THRESHOLD = 80
+PIPELINE_DAILY_REFRESH_LIMIT = 2
+PIPELINE_QUOTA_RESET_HOUR = 6
+EASTERN_TZ = ZoneInfo("America/New_York")
 APPLICATION_STATUSES = {
     "Not Applied",
     "Saved",
@@ -137,6 +142,13 @@ SORT_COLUMNS = {
     "job_title",
     "category_name",
 }
+FILTER_OPTION_FIELDS = {
+    "categories": "category_name",
+    "companies": "company",
+    "industries": "industry",
+    "locations": "location",
+}
+FILTER_OPTION_LIMIT = 500
 MART_JOB_COLUMNS = [
     "job_id",
     "category_name",
@@ -185,6 +197,8 @@ class JobFilters:
     visa_signal: str | None = None
     application_status: str | None = None
     search: str | None = None
+    posted_start_date: date | str | None = None
+    posted_end_date: date | str | None = None
     sort_by: str = "match_score"
     sort_order: str = "desc"
 
@@ -247,6 +261,10 @@ class JobRepository(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def get_filter_options(self) -> dict[str, list[str]]:
+        raise NotImplementedError
+
+    @abstractmethod
     def get_top_matches(self) -> list[dict[str, Any]]:
         raise NotImplementedError
 
@@ -304,6 +322,36 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def _now_et() -> datetime:
+    return datetime.now(EASTERN_TZ).replace(microsecond=0)
+
+
+def _iso_et(value: datetime | None = None) -> str:
+    return (value or _now_et()).astimezone(EASTERN_TZ).replace(microsecond=0).isoformat()
+
+
+def _parse_iso_datetime(value: Any) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, date):
+        parsed = datetime.combine(value, time.min)
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        if text.endswith("Z"):
+            text = f"{text[:-1]}+00:00"
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(EASTERN_TZ)
+
+
 def _number(value: Any) -> float | None:
     if value is None:
         return None
@@ -345,6 +393,24 @@ def _records(dataframe: pd.DataFrame) -> list[dict[str, Any]]:
     return [_normalize_record(row) for row in clean.to_dict(orient="records")]
 
 
+def _json_ready_value(value: Any) -> Any:
+    if not isinstance(value, (dict, list, tuple, set)):
+        try:
+            if pd.isna(value):
+                return None
+        except (TypeError, ValueError):
+            pass
+    if isinstance(value, pd.Timestamp):
+        if pd.isna(value):
+            return None
+        value = value.to_pydatetime()
+    if isinstance(value, datetime):
+        return value.replace(microsecond=0).isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    return value
+
+
 def _snake_case(value: str) -> str:
     value = re.sub(r"[^0-9a-zA-Z]+", "_", value).strip("_")
     return value.casefold()
@@ -378,7 +444,7 @@ def _normalize_record(row: dict[str, Any]) -> dict[str, Any]:
         elif api_key in NUMERIC_FIELDS:
             record[api_key] = _number(value)
         else:
-            record[api_key] = value
+            record[api_key] = _json_ready_value(value)
 
     if not record.get("job_id") and (record.get("job_title") or record.get("company")):
         record["job_id"] = stable_hash(
@@ -411,6 +477,53 @@ def _contains_filter(record_value: Any, filter_value: str | None) -> bool:
     return str(filter_value).casefold() in str(record_value or "").casefold()
 
 
+def _coerce_date(value: date | str | None) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        return datetime.fromisoformat(text).date()
+    except ValueError:
+        pass
+
+    parsed = pd.to_datetime(text, errors="coerce")
+    if pd.isna(parsed):
+        return None
+    if isinstance(parsed, pd.Timestamp):
+        return parsed.date()
+    return None
+
+
+def _date_in_range(record_value: Any, start_date: date | str | None, end_date: date | str | None) -> bool:
+    posted_date = _coerce_date(record_value)
+    if posted_date is None:
+        return False
+    resolved_start = _coerce_date(start_date)
+    resolved_end = _coerce_date(end_date)
+    if resolved_start and posted_date < resolved_start:
+        return False
+    if resolved_end and posted_date > resolved_end:
+        return False
+    return True
+
+
+def _option_values(rows: list[dict[str, Any]], field: str, limit: int = FILTER_OPTION_LIMIT) -> list[str]:
+    values = {
+        str(row.get(field) or "").strip()
+        for row in rows
+        if str(row.get(field) or "").strip()
+    }
+    return sorted(values, key=str.casefold)[:limit]
+
+
 def _apply_local_filters(rows: list[dict[str, Any]], filters: JobFilters) -> list[dict[str, Any]]:
     filtered = rows
     if filters.category_name:
@@ -434,6 +547,12 @@ def _apply_local_filters(rows: list[dict[str, Any]], filters: JobFilters) -> lis
             for row in filtered
             if any(_text_match(row.get(field), needle) for field in SEARCH_FIELDS)
         ]
+    if filters.posted_start_date or filters.posted_end_date:
+        filtered = [
+            row
+            for row in filtered
+            if _date_in_range(row.get("date_posted"), filters.posted_start_date, filters.posted_end_date)
+        ]
 
     reverse = filters.resolved_sort_order == "desc"
     sort_by = filters.resolved_sort_by
@@ -455,6 +574,9 @@ def _operation_state_path() -> Path:
     return output_dir() / "api_operation_status.json"
 
 
+_OPERATION_STATE_LOCK = threading.RLock()
+
+
 def _read_json_file(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
@@ -467,6 +589,180 @@ def _read_json_file(path: Path) -> dict[str, Any]:
 def _write_json_file(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def read_operation_state() -> dict[str, Any]:
+    with _OPERATION_STATE_LOCK:
+        return _read_json_file(_operation_state_path())
+
+
+class PipelineQuotaExceededError(RuntimeError):
+    def __init__(self, quota: dict[str, Any]) -> None:
+        super().__init__("Daily pipeline refresh limit reached.")
+        self.quota = quota
+
+
+def _quota_window(now: datetime | None = None) -> tuple[datetime, datetime]:
+    current = (now or _now_et()).astimezone(EASTERN_TZ)
+    today_reset = datetime.combine(
+        current.date(),
+        time(hour=PIPELINE_QUOTA_RESET_HOUR),
+        tzinfo=EASTERN_TZ,
+    )
+    window_start = today_reset if current >= today_reset else today_reset - timedelta(days=1)
+    return window_start, window_start + timedelta(days=1)
+
+
+def _history_from_state(state: dict[str, Any]) -> list[dict[str, Any]]:
+    history = state.get("pipeline_run_history")
+    return history if isinstance(history, list) else []
+
+
+def _pipeline_runs_from_state(state: dict[str, Any]) -> dict[str, Any]:
+    runs = state.get("pipeline_runs")
+    return runs if isinstance(runs, dict) else {}
+
+
+def _pipeline_quota_from_state(
+    state: dict[str, Any],
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    window_start, window_end = _quota_window(now)
+    used = 0
+    for run in _history_from_state(state):
+        started_at = _parse_iso_datetime(run.get("started_at"))
+        if started_at and window_start <= started_at < window_end:
+            used += 1
+
+    remaining = max(PIPELINE_DAILY_REFRESH_LIMIT - used, 0)
+    return {
+        "limit": PIPELINE_DAILY_REFRESH_LIMIT,
+        "used": min(used, PIPELINE_DAILY_REFRESH_LIMIT),
+        "remaining": remaining,
+        "window_start": window_start.isoformat(),
+        "window_end": window_end.isoformat(),
+        "resets_at": window_end.isoformat(),
+    }
+
+
+def get_pipeline_quota(now: datetime | None = None) -> dict[str, Any]:
+    with _OPERATION_STATE_LOCK:
+        return _pipeline_quota_from_state(_read_json_file(_operation_state_path()), now)
+
+
+def _new_pipeline_message(message: str, level: str = "info") -> dict[str, str]:
+    return {
+        "timestamp": _iso_et(),
+        "level": level,
+        "message": message,
+    }
+
+
+def reserve_pipeline_run(run_id: str) -> dict[str, Any]:
+    with _OPERATION_STATE_LOCK:
+        state = _read_json_file(_operation_state_path())
+        quota = _pipeline_quota_from_state(state)
+        if quota["remaining"] <= 0:
+            raise PipelineQuotaExceededError(quota)
+
+        started_at = _iso_et()
+        run_record = {
+            "run_id": run_id,
+            "status": "running",
+            "started_at": started_at,
+            "completed_at": None,
+            "messages": [_new_pipeline_message("Pipeline started")],
+            "summary": None,
+        }
+
+        runs = _pipeline_runs_from_state(state)
+        runs[run_id] = run_record
+        state["pipeline_runs"] = runs
+
+        history = _history_from_state(state)
+        history.append({"run_id": run_id, "started_at": started_at, "status": "running"})
+        window_start, _ = _quota_window()
+        history_floor = window_start - timedelta(days=7)
+        state["pipeline_run_history"] = [
+            item
+            for item in history
+            if (_parse_iso_datetime(item.get("started_at")) or _now_et()) >= history_floor
+        ]
+        _write_json_file(_operation_state_path(), state)
+        return run_record
+
+
+def _update_history_status(state: dict[str, Any], run_id: str, status: str) -> None:
+    for item in _history_from_state(state):
+        if item.get("run_id") == run_id:
+            item["status"] = status
+
+
+def get_pipeline_run_state(run_id: str) -> dict[str, Any] | None:
+    with _OPERATION_STATE_LOCK:
+        run = _pipeline_runs_from_state(_read_json_file(_operation_state_path())).get(run_id)
+        return run if isinstance(run, dict) else None
+
+
+def append_pipeline_run_message(run_id: str, message: str, level: str = "info") -> None:
+    if not message.strip():
+        return
+    with _OPERATION_STATE_LOCK:
+        state = _read_json_file(_operation_state_path())
+        runs = _pipeline_runs_from_state(state)
+        run = runs.get(run_id)
+        if not isinstance(run, dict):
+            return
+        messages = run.get("messages")
+        if not isinstance(messages, list):
+            messages = []
+        if messages and messages[-1].get("message") == message:
+            return
+        messages.append(_new_pipeline_message(message.strip(), level))
+        run["messages"] = messages[-200:]
+        runs[run_id] = run
+        state["pipeline_runs"] = runs
+        _write_json_file(_operation_state_path(), state)
+
+
+def complete_pipeline_run_state(run_id: str, summary: dict[str, Any]) -> dict[str, Any] | None:
+    with _OPERATION_STATE_LOCK:
+        state = _read_json_file(_operation_state_path())
+        runs = _pipeline_runs_from_state(state)
+        run = runs.get(run_id)
+        if not isinstance(run, dict):
+            return None
+        run["status"] = "completed"
+        run["completed_at"] = _iso_et()
+        run["summary"] = summary
+        messages = run.get("messages") if isinstance(run.get("messages"), list) else []
+        messages.append(_new_pipeline_message("Pipeline completed successfully"))
+        run["messages"] = messages[-200:]
+        runs[run_id] = run
+        state["pipeline_runs"] = runs
+        _update_history_status(state, run_id, "completed")
+        _write_json_file(_operation_state_path(), state)
+        return run
+
+
+def fail_pipeline_run_state(run_id: str, error_message: str) -> dict[str, Any] | None:
+    with _OPERATION_STATE_LOCK:
+        state = _read_json_file(_operation_state_path())
+        runs = _pipeline_runs_from_state(state)
+        run = runs.get(run_id)
+        if not isinstance(run, dict):
+            return None
+        run["status"] = "failed"
+        run["completed_at"] = _iso_et()
+        run["summary"] = {"error": error_message}
+        messages = run.get("messages") if isinstance(run.get("messages"), list) else []
+        messages.append(_new_pipeline_message(error_message, "error"))
+        run["messages"] = messages[-200:]
+        runs[run_id] = run
+        state["pipeline_runs"] = runs
+        _update_history_status(state, run_id, "failed")
+        _write_json_file(_operation_state_path(), state)
+        return run
 
 
 def _read_local_statuses() -> dict[str, dict[str, Any]]:
@@ -514,7 +810,7 @@ def _base_status(
     last_dbt_run_at: Any | None = None,
     last_dbt_test_at: Any | None = None,
 ) -> dict[str, Any]:
-    operation_state = _read_json_file(_operation_state_path())
+    operation_state = read_operation_state()
     path_value = operation_state.get("excel_path") or excel_path_value
     resolved_excel = Path(path_value) if path_value else None
     if resolved_excel and not resolved_excel.is_absolute():
@@ -540,13 +836,15 @@ def _base_status(
         "configured_sources": _configured_sources(),
         "job_sources": _configured_categories(),
         "latest_run_status": latest_run_status,
+        "pipeline_quota": _pipeline_quota_from_state(operation_state),
     }
 
 
 def write_operation_state(**updates: Any) -> None:
-    state = _read_json_file(_operation_state_path())
-    state.update(updates)
-    _write_json_file(_operation_state_path(), state)
+    with _OPERATION_STATE_LOCK:
+        state = _read_json_file(_operation_state_path())
+        state.update(updates)
+        _write_json_file(_operation_state_path(), state)
 
 
 class LocalJobRepository(JobRepository):
@@ -636,6 +934,13 @@ class LocalJobRepository(JobRepository):
         state[user_id] = user_state
         _write_json_file(_status_sidecar_path(), state)
         return payload
+
+    def get_filter_options(self) -> dict[str, list[str]]:
+        rows = self._jobs()
+        return {
+            option_name: _option_values(rows, field)
+            for option_name, field in FILTER_OPTION_FIELDS.items()
+        }
 
     def get_top_matches(self) -> list[dict[str, Any]]:
         return _apply_local_filters(
@@ -743,6 +1048,14 @@ class MotherDuckJobRepository(JobRepository):
             search_sql = " || ' ' || ".join(f"coalesce(cast({field} as varchar), '')" for field in SEARCH_FIELDS)
             clauses.append(f"lower({search_sql}) like ?")
             params.append(f"%{filters.search.casefold()}%")
+        if filters.posted_start_date or filters.posted_end_date:
+            posted_date_expr = "coalesce(try_cast(date_posted as date), cast(try_cast(date_posted as timestamp) as date))"
+            if filters.posted_start_date:
+                clauses.append(f"{posted_date_expr} >= ?")
+                params.append(str(_coerce_date(filters.posted_start_date)))
+            if filters.posted_end_date:
+                clauses.append(f"{posted_date_expr} <= ?")
+                params.append(str(_coerce_date(filters.posted_end_date)))
 
         where_sql = f"where {' and '.join(clauses)}" if clauses else ""
         return where_sql, params
@@ -826,6 +1139,22 @@ class MotherDuckJobRepository(JobRepository):
             "notes": notes,
             "updated_at": updated_at,
         }
+
+    def get_filter_options(self) -> dict[str, list[str]]:
+        options: dict[str, list[str]] = {}
+        for option_name, field in FILTER_OPTION_FIELDS.items():
+            rows = self._query(
+                f"""
+                select distinct trim(cast({field} as varchar)) as value
+                from mart.mart_jobs_scored
+                where {field} is not null
+                  and trim(cast({field} as varchar)) <> ''
+                order by value
+                limit {FILTER_OPTION_LIMIT}
+                """
+            )
+            options[option_name] = [str(row["value"]) for row in rows if row.get("value")]
+        return options
 
     def get_top_matches(self) -> list[dict[str, Any]]:
         return self.get_jobs(

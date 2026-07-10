@@ -57,9 +57,14 @@ export default function TopMatchesPage() {
         description="A focused review queue for high-scoring opportunities, with enough context to decide whether to save, apply, or archive."
       />
 
-      {error ? <ErrorState error={error} /> : null}
+      {error ? <ErrorState error={error} title="Top matches unavailable" /> : null}
       {loading ? <LoadingState label="Loading top matches..." /> : null}
-      {!loading && !jobs.length ? <EmptyState title="No top matches yet" /> : null}
+      {!loading && !error && !jobs.length ? (
+        <EmptyState
+          title="No top matches yet"
+          description="Run the pipeline or broaden your scoring criteria to build today's high-fit review queue."
+        />
+      ) : null}
 
       <div className="grid gap-4 xl:grid-cols-2">
         {jobs.map((job) => (
