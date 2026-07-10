@@ -4,6 +4,7 @@ import type {
   DashboardSummary,
   DataStatus,
   Job,
+  JobFacets,
   JobFilterOptions,
   JobFilters,
   PaginatedJobs,
@@ -128,6 +129,10 @@ export function getJobs(filters: JobFilters = {}) {
 
 export function getJobFilterOptions() {
   return request<JobFilterOptions>("/api/jobs/filter-options");
+}
+
+export function getJobFacets() {
+  return request<JobFacets>("/api/jobs/facets");
 }
 
 export function getJob(jobId: string) {

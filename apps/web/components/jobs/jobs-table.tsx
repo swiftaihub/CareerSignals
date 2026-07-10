@@ -237,7 +237,12 @@ export function ResponsiveJobsTable({
                   </td>
                   <td className="whitespace-nowrap">{formatCurrency(job.salary_midpoint)}</td>
                   <td>
-                    <VisaSignalBadge signal={job.visa_signal} />
+                    <VisaSignalBadge
+                      confidence={job.visa_confidence}
+                      evidence={job.visa_evidence}
+                      signal={job.visa_signal}
+                      status={job.visa_status}
+                    />
                   </td>
                   <td>
                     <ApplicationStatusSelect
@@ -265,7 +270,12 @@ export function ResponsiveJobsTable({
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap gap-2">
                   <MatchScoreBadge compact score={job.match_score} tier={job.match_tier} />
-                  <VisaSignalBadge signal={job.visa_signal} />
+                  <VisaSignalBadge
+                    confidence={job.visa_confidence}
+                    evidence={job.visa_evidence}
+                    signal={job.visa_signal}
+                    status={job.visa_status}
+                  />
                   <WorkBadge value={job.work_arrangement} />
                 </div>
                 <button

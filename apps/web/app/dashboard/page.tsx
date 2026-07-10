@@ -13,7 +13,6 @@ import { AppShell } from "@/components/layout/app-shell";
 import { PageHeader } from "@/components/layout/page-header";
 import { MatchScoreBadge } from "@/components/jobs/match-score-badge";
 import { VisaSignalBadge } from "@/components/jobs/visa-signal-badge";
-import { DataStatusBadge } from "@/components/shared/data-status-badge";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorState } from "@/components/shared/error-state";
 import { LoadingState } from "@/components/shared/loading-state";
@@ -56,12 +55,11 @@ export default function DashboardPage() {
         eyebrow="Dashboard"
         title="Career intelligence command center"
         description="Monitor data freshness, market signal quality, top matches, and role-fit distribution from one FastAPI-backed view."
-        action={<DataStatusBadge status={summary.data_status} />}
       />
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard
-          helper="All roles available through the current data mode"
+          helper="All roles available in the active intelligence dataset"
           icon={<BriefcaseBusiness className="h-5 w-5" />}
           label="Total Jobs"
           value={summary.metrics.total_jobs}
@@ -98,11 +96,6 @@ export default function DashboardPage() {
           icon={<RadioTower className="h-5 w-5" />}
           label="Latest Pipeline Run"
           value={formatDate(summary.data_status.last_pipeline_run_at || summary.data_status.last_pipeline_run)}
-        />
-        <MetricCard
-          helper="Repository mode currently serving the UI"
-          label="Data Mode"
-          value={formatNullable(summary.data_status.data_mode)}
         />
       </div>
 
@@ -152,7 +145,14 @@ export default function DashboardPage() {
                     <td>{formatNullable(job.company)}</td>
                     <td><MatchScoreBadge score={job.match_score} tier={job.match_tier} /></td>
                     <td>{formatCurrency(job.salary_midpoint)}</td>
-                    <td><VisaSignalBadge signal={job.visa_signal} /></td>
+                    <td>
+                      <VisaSignalBadge
+                        confidence={job.visa_confidence}
+                        evidence={job.visa_evidence}
+                        signal={job.visa_signal}
+                        status={job.visa_status}
+                      />
+                    </td>
                     <td><Link className="btn h-8 px-3 text-xs" href="/jobs">Open Jobs</Link></td>
                   </tr>
                 ))}

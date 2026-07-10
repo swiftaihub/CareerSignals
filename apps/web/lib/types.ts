@@ -19,6 +19,8 @@ export interface Job {
   company?: string | null;
   industry?: string | null;
   location?: string | null;
+  location_normalized?: string | null;
+  location_group?: string | null;
   work_arrangement?: string | null;
   seniority?: string | null;
   employment_type?: string | null;
@@ -27,6 +29,9 @@ export interface Job {
   salary_max?: number | null;
   salary_midpoint?: number | null;
   visa_signal?: string | null;
+  visa_status?: string | null;
+  visa_evidence?: string | null;
+  visa_confidence?: string | null;
   required_skills?: string[];
   preferred_skills?: string[];
   all_extracted_skills?: string[];
@@ -52,6 +57,7 @@ export interface JobFilters {
   company?: string;
   industry?: string;
   location?: string;
+  location_group?: string;
   work_arrangement?: string;
   visa_signal?: string;
   application_status?: string;
@@ -67,6 +73,22 @@ export interface JobFilterOptions {
   companies: string[];
   industries: string[];
   locations: string[];
+}
+
+export interface LocationFacet {
+  group: string;
+  value: string;
+  count: number;
+}
+
+export interface LocationGroupFacet {
+  group: string;
+  count: number;
+}
+
+export interface JobFacets {
+  locations: LocationFacet[];
+  location_groups: LocationGroupFacet[];
 }
 
 export interface PaginatedJobs {

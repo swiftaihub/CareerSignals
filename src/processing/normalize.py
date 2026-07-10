@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from src.config.schemas import JobCategoryConfig, NormalizedJob
+from src.processing.location_normalization import normalize_location
 from src.processing.salary_parser import parse_salary
 from src.utils.hashing import stable_hash
 from src.utils.text_cleaning import clean_text, normalize_title
@@ -22,6 +23,7 @@ def normalize_raw_job(
     job_title = clean_text(raw_job.get("job_title") or raw_job.get("title"))
     company = clean_text(raw_job.get("company") or raw_job.get("company_name"))
     location = clean_text(raw_job.get("location") or raw_job.get("job_location") or "Unknown")
+    location_result = normalize_location(location)
     jd_post_link = clean_text(raw_job.get("jd_post_link") or raw_job.get("url") or "")
     apply_link = clean_text(raw_job.get("apply_link") or raw_job.get("application_url")) or None
     description = clean_text(raw_job.get("job_description") or raw_job.get("description"))
@@ -44,6 +46,8 @@ def normalize_raw_job(
         company=company,
         industry=clean_text(raw_job.get("industry") or "Unknown") or "Unknown",
         location=location,
+        location_normalized=location_result.normalized,
+        location_group=location_result.group,
         work_arrangement=clean_text(raw_job.get("work_arrangement") or "Unknown") or "Unknown",
         employment_type=clean_text(raw_job.get("employment_type") or "full-time") or "full-time",
         seniority=clean_text(raw_job.get("seniority") or "Unknown") or "Unknown",

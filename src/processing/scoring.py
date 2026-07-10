@@ -140,7 +140,7 @@ def build_reasoning_summary(job: dict[str, Any], candidate: Candidate) -> str:
     industry = job.get("industry") or "Unknown"
     salary_context = _format_salary_context(job, candidate)
     work_arrangement = job.get("work_arrangement") or "Unknown"
-    visa_signal = job.get("visa_signal") or "Unknown"
+    visa_status = job.get("visa_status") or job.get("visa_signal") or "Unknown"
 
     if tier == "Low Priority":
         opener = "Lower-priority match"
@@ -150,7 +150,7 @@ def build_reasoning_summary(job: dict[str, Any], candidate: Candidate) -> str:
     return (
         f"{opener} because the role aligns with {skill_text} in {industry}. "
         f"{salary_context}, work arrangement is {work_arrangement}, and visa "
-        f"sponsorship signal is {visa_signal}."
+        f"sponsorship status is {visa_status}."
     )
 
 

@@ -19,11 +19,18 @@ models:
       - name: visa_signal
         tests:
           - accepted_values:
-              values: ["Positive", "Negative", "Unknown"]
+              arguments:
+                values: ["Positive", "Negative", "Unknown"]
+      - name: visa_status
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["Sponsorship Available", "No Sponsorship", "U.S. Citizenship Required", "Permanent Work Authorization Required", "Unknown"]
       - name: application_status
         tests:
           - accepted_values:
-              values: ["Not Applied", "Saved", "Applied", "Interview", "Rejected", "Offer", "Archived"]
+              arguments:
+                values: ["Not Applied", "Saved", "Applied", "Interview", "Rejected", "Offer", "Archived"]
 
   - name: mart_top_matches
     columns:

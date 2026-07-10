@@ -27,6 +27,11 @@ from packages.careersignal_core.settings import (
 from packages.careersignal_core.storage.motherduck import MotherDuckService
 from packages.careersignal_core.storage.schema import init_motherduck_schema
 from src.config.loader import load_configs
+from src.processing.location_normalization import (
+    build_location_facets,
+    normalize_location,
+)
+from src.processing.visa_signal import NO_SPONSORSHIP, SPONSORSHIP_AVAILABLE, UNKNOWN_STATUS
 from src.utils.hashing import stable_hash
 
 PERSONAL_USER_ID = "personal_user"
@@ -54,6 +59,8 @@ DISPLAY_COLUMN_MAP: dict[str, str] = {
     "Company": "company",
     "Industry": "industry",
     "Location": "location",
+    "Location Normalized": "location_normalized",
+    "Location Group": "location_group",
     "Work Arrangement": "work_arrangement",
     "Seniority": "seniority",
     "Employment Type": "employment_type",
@@ -62,6 +69,9 @@ DISPLAY_COLUMN_MAP: dict[str, str] = {
     "Salary Max": "salary_max",
     "Salary Midpoint": "salary_midpoint",
     "Visa Signal": "visa_signal",
+    "Visa Status": "visa_status",
+    "Visa Evidence": "visa_evidence",
+    "Visa Confidence": "visa_confidence",
     "Required Skills": "required_skills",
     "Preferred Skills": "preferred_skills",
     "All Extracted Skills": "all_extracted_skills",
@@ -159,6 +169,8 @@ MART_JOB_COLUMNS = [
     "company",
     "industry",
     "location",
+    "location_normalized",
+    "location_group",
     "work_arrangement",
     "seniority",
     "employment_type",
@@ -167,6 +179,9 @@ MART_JOB_COLUMNS = [
     "salary_max",
     "salary_midpoint",
     "visa_signal",
+    "visa_status",
+    "visa_evidence",
+    "visa_confidence",
     "required_skills",
     "preferred_skills",
     "all_extracted_skills",
@@ -193,6 +208,7 @@ class JobFilters:
     company: str | None = None
     industry: str | None = None
     location: str | None = None
+    location_group: str | None = None
     work_arrangement: str | None = None
     visa_signal: str | None = None
     application_status: str | None = None
@@ -262,6 +278,10 @@ class JobRepository(ABC):
 
     @abstractmethod
     def get_filter_options(self) -> dict[str, list[str]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_facets(self) -> dict[str, Any]:
         raise NotImplementedError
 
     @abstractmethod
@@ -458,7 +478,7 @@ def _normalize_record(row: dict[str, Any]) -> dict[str, Any]:
         )
     if not record.get("application_status"):
         record["application_status"] = "Not Applied"
-    return record
+    return _apply_derived_fields(record)
 
 
 def _text_match(value: Any, needle: str) -> bool:
@@ -475,6 +495,38 @@ def _contains_filter(record_value: Any, filter_value: str | None) -> bool:
     if not filter_value:
         return True
     return str(filter_value).casefold() in str(record_value or "").casefold()
+
+
+def _location_matches(row: dict[str, Any], query: str | None) -> bool:
+    if not query:
+        return True
+    needle = query.casefold().strip()
+    if not needle:
+        return True
+    haystack = " ".join(
+        str(row.get(field) or "")
+        for field in ("location", "location_normalized", "location_group")
+    ).casefold()
+    return needle in haystack
+
+
+def _apply_derived_fields(record: dict[str, Any]) -> dict[str, Any]:
+    location_result = normalize_location(record.get("location"))
+    if not record.get("location_normalized"):
+        record["location_normalized"] = location_result.normalized
+    if not record.get("location_group"):
+        record["location_group"] = location_result.group
+    if not record.get("visa_status"):
+        signal = str(record.get("visa_signal") or "Unknown")
+        if signal == "Positive":
+            record["visa_status"] = SPONSORSHIP_AVAILABLE
+        elif signal == "Negative":
+            record["visa_status"] = NO_SPONSORSHIP
+        else:
+            record["visa_status"] = UNKNOWN_STATUS
+    if not record.get("visa_confidence"):
+        record["visa_confidence"] = "Low"
+    return record
 
 
 def _coerce_date(value: date | str | None) -> date | None:
@@ -525,7 +577,7 @@ def _option_values(rows: list[dict[str, Any]], field: str, limit: int = FILTER_O
 
 
 def _apply_local_filters(rows: list[dict[str, Any]], filters: JobFilters) -> list[dict[str, Any]]:
-    filtered = rows
+    filtered = [_apply_derived_fields(dict(row)) for row in rows]
     if filters.category_name:
         filtered = [row for row in filtered if row.get("category_name") == filters.category_name]
     if filters.min_match_score is not None:
@@ -536,10 +588,14 @@ def _apply_local_filters(rows: list[dict[str, Any]], filters: JobFilters) -> lis
         filtered = [
             row for row in filtered if (_number(row.get("match_score")) or 0) <= filters.max_match_score
         ]
-    for field in ("company", "industry", "location", "work_arrangement", "visa_signal", "application_status"):
+    for field in ("company", "industry", "work_arrangement", "visa_signal", "application_status"):
         value = getattr(filters, field)
         if value:
             filtered = [row for row in filtered if _contains_filter(row.get(field), value)]
+    if filters.location_group:
+        filtered = [row for row in filtered if row.get("location_group") == filters.location_group]
+    if filters.location:
+        filtered = [row for row in filtered if _location_matches(row, filters.location)]
     if filters.search:
         needle = filters.search.casefold().strip()
         filtered = [
@@ -942,6 +998,10 @@ class LocalJobRepository(JobRepository):
             for option_name, field in FILTER_OPTION_FIELDS.items()
         }
 
+    def get_facets(self) -> dict[str, Any]:
+        rows = self._jobs()
+        return build_location_facets(row.get("location") for row in rows)
+
     def get_top_matches(self) -> list[dict[str, Any]]:
         return _apply_local_filters(
             self._jobs(),
@@ -977,12 +1037,40 @@ class MotherDuckJobRepository(JobRepository):
 
     def __init__(self, service: MotherDuckService | None = None) -> None:
         self.service = service or MotherDuckService()
+        self._available_columns: set[str] | None = None
 
     def _query(self, sql: str, params: list[Any] | tuple[Any, ...] | None = None) -> list[dict[str, Any]]:
         return _records(self.service.query_df(sql, params))
 
+    def _mart_columns(self) -> set[str]:
+        if self._available_columns is not None:
+            return self._available_columns
+        try:
+            rows = self._query(
+                """
+                select column_name
+                from information_schema.columns
+                where table_schema = 'mart'
+                  and table_name = 'mart_jobs_scored'
+                """
+            )
+        except Exception:
+            rows = []
+        self._available_columns = {str(row.get("column_name")) for row in rows if row.get("column_name")}
+        return self._available_columns
+
+    def _select_job_columns_sql(self) -> str:
+        available = self._mart_columns()
+        expressions: list[str] = []
+        for column in MART_JOB_COLUMNS:
+            if not available or column in available:
+                expressions.append(f"jobs.{column}")
+            else:
+                expressions.append(f"cast(null as varchar) as {column}")
+        return ",\n                ".join(expressions)
+
     def _jobs_base_sql(self) -> str:
-        selected_columns = ",\n                ".join(f"jobs.{column}" for column in MART_JOB_COLUMNS)
+        selected_columns = self._select_job_columns_sql()
         return f"""
             with latest_status as (
                 select
@@ -1018,6 +1106,7 @@ class MotherDuckJobRepository(JobRepository):
     def _where_sql(self, filters: JobFilters) -> tuple[str, list[Any]]:
         clauses: list[str] = []
         params: list[Any] = [PERSONAL_USER_ID]
+        available_columns = self._mart_columns()
         exact_filters = {
             "category_name": filters.category_name,
             "work_arrangement": filters.work_arrangement,
@@ -1027,7 +1116,6 @@ class MotherDuckJobRepository(JobRepository):
         contains_filters = {
             "company": filters.company,
             "industry": filters.industry,
-            "location": filters.location,
         }
 
         for column, value in exact_filters.items():
@@ -1038,6 +1126,32 @@ class MotherDuckJobRepository(JobRepository):
             if value:
                 clauses.append(f"lower(coalesce({column}, '')) like ?")
                 params.append(f"%{value.casefold()}%")
+        if filters.location_group:
+            group_locations = self._location_values_for_group(filters.location_group)
+            if "location_group" in available_columns:
+                if group_locations:
+                    placeholders = ", ".join("?" for _ in group_locations)
+                    clauses.append(
+                        f"(location_group = ? or (location_group is null and coalesce(location, '') in ({placeholders})))"
+                    )
+                    params.append(filters.location_group)
+                    params.extend(group_locations)
+                else:
+                    clauses.append("location_group = ?")
+                    params.append(filters.location_group)
+            elif group_locations:
+                placeholders = ", ".join("?" for _ in group_locations)
+                clauses.append(f"coalesce(location, '') in ({placeholders})")
+                params.extend(group_locations)
+            else:
+                clauses.append("1 = 0")
+        if filters.location:
+            if "location_normalized" in available_columns:
+                location_sql = "coalesce(location, '') || ' ' || coalesce(location_normalized, '')"
+            else:
+                location_sql = "coalesce(location, '')"
+            clauses.append(f"lower({location_sql}) like ?")
+            params.append(f"%{filters.location.casefold()}%")
         if filters.min_match_score is not None:
             clauses.append("match_score >= ?")
             params.append(filters.min_match_score)
@@ -1140,6 +1254,27 @@ class MotherDuckJobRepository(JobRepository):
             "updated_at": updated_at,
         }
 
+    def _location_counts(self) -> list[dict[str, Any]]:
+        return self._query(
+            """
+            select
+                location,
+                count(*) as count
+            from mart.mart_jobs_scored
+            where location is not null
+              and trim(cast(location as varchar)) <> ''
+            group by location
+            """
+        )
+
+    def _location_values_for_group(self, location_group: str) -> list[str]:
+        values: list[str] = []
+        for row in self._location_counts():
+            location_value = str(row.get("location") or "")
+            if normalize_location(location_value).group == location_group:
+                values.append(location_value)
+        return values
+
     def get_filter_options(self) -> dict[str, list[str]]:
         options: dict[str, list[str]] = {}
         for option_name, field in FILTER_OPTION_FIELDS.items():
@@ -1155,6 +1290,13 @@ class MotherDuckJobRepository(JobRepository):
             )
             options[option_name] = [str(row["value"]) for row in rows if row.get("value")]
         return options
+
+    def get_facets(self) -> dict[str, Any]:
+        locations: list[str] = []
+        for row in self._location_counts():
+            count = int(_number(row.get("count")) or 0)
+            locations.extend([row.get("location")] * max(count, 0))
+        return build_location_facets(locations)
 
     def get_top_matches(self) -> list[dict[str, Any]]:
         return self.get_jobs(

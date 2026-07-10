@@ -6,7 +6,7 @@ from packages.careersignal_core.storage.motherduck import (
     MotherDuckConfigurationError,
     MotherDuckService,
 )
-from packages.careersignal_core.storage.schema import SCHEMA_SQL, TABLE_SQL
+from packages.careersignal_core.storage.schema import MIGRATION_SQL, SCHEMA_SQL, TABLE_SQL
 
 
 def test_motherduck_service_uses_careersignal_default_database(monkeypatch) -> None:
@@ -32,6 +32,7 @@ def test_motherduck_service_requires_token_in_motherduck_mode(monkeypatch) -> No
 def test_schema_sql_contains_required_schemas_and_tables() -> None:
     schema_sql = "\n".join(SCHEMA_SQL).casefold()
     table_sql = "\n".join(TABLE_SQL).casefold()
+    migration_sql = "\n".join(MIGRATION_SQL).casefold()
 
     for schema_name in ("raw", "staging", "intermediate", "mart", "app"):
         assert f"create schema if not exists {schema_name}" in schema_sql
@@ -44,3 +45,13 @@ def test_schema_sql_contains_required_schemas_and_tables() -> None:
         "app.job_application_status",
     ):
         assert table_name in table_sql
+
+    for column_name in (
+        "location_normalized",
+        "location_group",
+        "visa_status",
+        "visa_evidence",
+        "visa_confidence",
+    ):
+        assert column_name in table_sql
+        assert column_name in migration_sql

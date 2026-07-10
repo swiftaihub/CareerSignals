@@ -189,6 +189,7 @@ def get_jobs(
     company: str | None = None,
     industry: str | None = None,
     location: str | None = None,
+    location_group: str | None = None,
     work_arrangement: str | None = None,
     visa_signal: str | None = None,
     application_status: str | None = None,
@@ -217,6 +218,7 @@ def get_jobs(
             company=company,
             industry=industry,
             location=location,
+            location_group=location_group,
             work_arrangement=work_arrangement,
             visa_signal=visa_signal,
             application_status=application_status,
@@ -233,6 +235,11 @@ def get_jobs(
 @app.get("/api/jobs/filter-options")
 def get_job_filter_options(repository: JobRepository = Depends(get_repository)):
     return repository.get_filter_options()
+
+
+@app.get("/api/jobs/facets")
+def get_job_facets(repository: JobRepository = Depends(get_repository)):
+    return repository.get_facets()
 
 
 @app.get("/api/jobs/{job_id}")

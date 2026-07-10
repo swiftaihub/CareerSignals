@@ -2,11 +2,14 @@
 
 import { DateRangeFilter } from "@/components/jobs/date-range-filter";
 import { FilterSelect } from "@/components/jobs/filter-select";
+import { LocationCombobox } from "@/components/jobs/location-combobox";
 import { APPLICATION_STATUSES, JOB_SORT_OPTIONS, VISA_SIGNALS, WORK_ARRANGEMENTS } from "@/lib/constants";
-import type { JobFilterOptions, JobFilters as JobFilterValues } from "@/lib/types";
+import type { JobFacets, JobFilterOptions, JobFilters as JobFilterValues } from "@/lib/types";
 
 interface JobFiltersProps {
   filters: JobFilterValues;
+  facets: JobFacets;
+  facetsLoading?: boolean;
   options: JobFilterOptions;
   onChange: (filters: JobFilterValues) => void;
   onReset: () => void;
@@ -27,7 +30,7 @@ function updateValue(
   onChange({ ...filters, page: 1, [key]: parsedValue });
 }
 
-export function JobFilters({ filters, options, onChange, onReset }: JobFiltersProps) {
+export function JobFilters({ filters, facets, facetsLoading, options, onChange, onReset }: JobFiltersProps) {
   return (
     <div className="rounded-lg border border-border bg-card p-4 shadow-soft">
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -61,12 +64,19 @@ export function JobFilters({ filters, options, onChange, onReset }: JobFiltersPr
           value={filters.industry}
           onChange={(value) => updateValue(filters, "industry", value, onChange)}
         />
-        <FilterSelect
-          label="Location"
-          options={options.locations}
-          placeholder="Any location"
-          value={filters.location}
-          onChange={(value) => updateValue(filters, "location", value, onChange)}
+        <LocationCombobox
+          facets={facets}
+          loading={facetsLoading}
+          location={filters.location}
+          locationGroup={filters.location_group}
+          onChange={(next) =>
+            onChange({
+              ...filters,
+              page: 1,
+              location: next.location,
+              location_group: next.location_group
+            })
+          }
         />
         <FilterSelect
           label="Work"

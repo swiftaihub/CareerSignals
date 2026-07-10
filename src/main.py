@@ -35,7 +35,7 @@ from src.processing.normalize import normalize_raw_job
 from src.processing.scoring import score_job
 from src.processing.seniority_classifier import classify_seniority
 from src.processing.skill_extractor import RuleBasedSkillExtractor
-from src.processing.visa_signal import detect_visa_signal
+from src.processing.visa_signal import classify_visa_signal
 from src.processing.work_arrangement import detect_work_arrangement
 from src.utils.file_outputs import timestamped_output_path
 from src.utils.logging import configure_logging
@@ -253,6 +253,7 @@ def _enrich_and_score_jobs(
         description = str(job.get("job_description") or "")
 
         skill_result = extractor.extract(description)
+        visa_classification = classify_visa_signal(description, candidate.visa_keywords)
         enriched = {
             **job,
             "industry": classify_industry(
@@ -270,10 +271,10 @@ def _enrich_and_score_jobs(
                 str(job.get("location") or ""),
                 description,
             ),
-            "visa_signal": detect_visa_signal(
-                description,
-                candidate.visa_keywords,
-            ),
+            "visa_signal": visa_classification.visa_signal,
+            "visa_status": visa_classification.visa_status,
+            "visa_evidence": visa_classification.visa_evidence,
+            "visa_confidence": visa_classification.visa_confidence,
             "required_skills": skill_result.required_skills,
             "preferred_skills": skill_result.preferred_skills,
             "all_extracted_skills": skill_result.all_extracted_skills,

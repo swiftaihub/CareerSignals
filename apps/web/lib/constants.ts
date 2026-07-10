@@ -22,6 +22,14 @@ export const WORK_ARRANGEMENTS = ["Remote", "Hybrid", "On-site", "Unknown"];
 
 export const VISA_SIGNALS = ["Positive", "Unknown", "Negative"];
 
+export const VISA_STATUSES = [
+  "Sponsorship Available",
+  "No Sponsorship",
+  "U.S. Citizenship Required",
+  "Permanent Work Authorization Required",
+  "Unknown"
+];
+
 export const JOB_SORT_OPTIONS = [
   { value: "match_score", label: "Match score" },
   { value: "salary_midpoint", label: "Salary midpoint" },

@@ -73,7 +73,12 @@ export default function TopMatchesPage() {
               <div>
                 <div className="flex flex-wrap gap-2">
                   <MatchScoreBadge score={job.match_score} tier={job.match_tier} />
-                  <VisaSignalBadge signal={job.visa_signal} />
+                  <VisaSignalBadge
+                    confidence={job.visa_confidence}
+                    evidence={job.visa_evidence}
+                    signal={job.visa_signal}
+                    status={job.visa_status}
+                  />
                 </div>
                 <h2 className="mt-4 text-lg font-bold text-foreground">
                   {formatNullable(job.job_title)}

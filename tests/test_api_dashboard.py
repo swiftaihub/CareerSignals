@@ -14,11 +14,13 @@ from packages.careersignal_core.repositories.jobs import (
     JobRepository,
     PaginatedJobs,
     PipelineQuotaExceededError,
+    _apply_derived_fields,
     _apply_local_filters,
     _records,
     get_pipeline_quota,
     reserve_pipeline_run,
 )
+from src.processing.location_normalization import build_location_facets
 
 
 JOBS = [
@@ -81,7 +83,8 @@ class FakeRepository(JobRepository):
         )
 
     def get_job(self, job_id: str) -> dict[str, Any] | None:
-        return next((job for job in self.jobs if job["job_id"] == job_id), None)
+        job = next((job for job in self.jobs if job["job_id"] == job_id), None)
+        return _apply_derived_fields(dict(job)) if job else None
 
     def update_job_status(
         self,
@@ -106,6 +109,9 @@ class FakeRepository(JobRepository):
             "industries": sorted({job["industry"] for job in self.jobs}),
             "locations": sorted({job["location"] for job in self.jobs}),
         }
+
+    def get_facets(self) -> dict[str, Any]:
+        return build_location_facets(job["location"] for job in self.jobs)
 
     def get_top_matches(self) -> list[dict[str, Any]]:
         return [job for job in self.jobs if job["match_score"] >= 80]
@@ -215,6 +221,38 @@ def test_job_filter_options_endpoint() -> None:
     assert response.json()["companies"] == ["Alpha Data", "Beta Bank"]
 
 
+def test_job_facets_endpoint_returns_grouped_location_metadata() -> None:
+    app.dependency_overrides[get_repository] = lambda: FakeRepository()
+    client = TestClient(app)
+
+    response = client.get("/api/jobs/facets")
+
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert {"group": "Remote", "value": "Remote", "count": 1} in payload["locations"]
+    assert {"group": "Northeast", "value": "Philadelphia, PA", "count": 1} in payload["locations"]
+    assert {"group": "Northeast", "count": 1} in payload["location_groups"]
+
+
+def test_jobs_endpoint_supports_location_group_and_free_text_filters() -> None:
+    app.dependency_overrides[get_repository] = lambda: FakeRepository()
+    client = TestClient(app)
+
+    by_group = client.get("/api/jobs", params={"location_group": "Northeast"})
+    by_text = client.get("/api/jobs", params={"location": "PA"})
+
+    app.dependency_overrides.clear()
+
+    assert by_group.status_code == 200
+    assert by_group.json()["total"] == 1
+    assert by_group.json()["items"][0]["job_id"] == "job-2"
+    assert by_text.status_code == 200
+    assert by_text.json()["total"] == 1
+    assert by_text.json()["items"][0]["location_group"] == "Northeast"
+
+
 def test_job_detail_and_status_update() -> None:
     app.dependency_overrides[get_repository] = lambda: FakeRepository()
     client = TestClient(app)
@@ -267,6 +305,13 @@ def test_local_filtering_logic() -> None:
     )
 
     assert [job["job_id"] for job in filtered] == ["job-1"]
+
+
+def test_legacy_visa_signal_gets_descriptive_status_fallback() -> None:
+    record = _apply_derived_fields({"job_id": "legacy-negative", "visa_signal": "Negative"})
+
+    assert record["visa_status"] == "No Sponsorship"
+    assert record["visa_confidence"] == "Low"
 
 
 def test_records_convert_pandas_missing_scalars_to_json_none() -> None:

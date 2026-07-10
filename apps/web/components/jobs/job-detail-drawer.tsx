@@ -52,7 +52,12 @@ export function JobDetailDrawer({
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <MatchScoreBadge score={job.match_score} tier={job.match_tier} />
-              <VisaSignalBadge signal={job.visa_signal} />
+              <VisaSignalBadge
+                confidence={job.visa_confidence}
+                evidence={job.visa_evidence}
+                signal={job.visa_signal}
+                status={job.visa_status}
+              />
             </div>
             <h2 className="mt-4 text-2xl font-bold text-foreground">
               {formatNullable(job.job_title)}
@@ -82,6 +87,26 @@ export function JobDetailDrawer({
             <h3 className="text-sm font-semibold text-foreground">Reasoning Summary</h3>
             <p className="mt-2 rounded-lg border border-border bg-background p-4 text-sm leading-6 text-muted-foreground">
               {formatNullable(job.reasoning_summary)}
+            </p>
+          </section>
+
+          <section className="rounded-lg border border-border bg-background p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">Visa Sponsorship Signal</h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {formatNullable(job.visa_confidence)} confidence from the job-description language.
+                </p>
+              </div>
+              <VisaSignalBadge
+                confidence={job.visa_confidence}
+                evidence={job.visa_evidence}
+                signal={job.visa_signal}
+                status={job.visa_status}
+              />
+            </div>
+            <p className="mt-3 rounded-md bg-muted/50 p-3 text-sm leading-6 text-muted-foreground">
+              {job.visa_evidence || "No explicit visa sponsorship or citizenship language was detected."}
             </p>
           </section>
 
