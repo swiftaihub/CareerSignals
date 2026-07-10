@@ -1,0 +1,1 @@
+"""CareerSignal FastAPI backend."""

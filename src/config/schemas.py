@@ -119,6 +119,8 @@ class NormalizedJob(BaseModel):
     company: str
     industry: str = "Unknown"
     location: str
+    location_normalized: str = "Unknown"
+    location_group: str = "Other or Unclassified"
     work_arrangement: str = "Unknown"
     employment_type: str = "full-time"
     seniority: str = "Unknown"
@@ -135,6 +137,9 @@ class NormalizedJob(BaseModel):
     preferred_skills: list[str] = Field(default_factory=list)
     all_extracted_skills: list[str] = Field(default_factory=list)
     visa_signal: str = "Unknown"
+    visa_status: str = "Unknown"
+    visa_evidence: str | None = None
+    visa_confidence: str = "Low"
     match_score: float = 0.0
     match_tier: str = "Low Priority"
     reasoning_summary: str = ""

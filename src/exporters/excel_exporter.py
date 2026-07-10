@@ -23,6 +23,8 @@ ALL_JOBS_COLUMNS: list[tuple[str, str]] = [
     ("company", "Company"),
     ("industry", "Industry"),
     ("location", "Location"),
+    ("location_normalized", "Normalized Location"),
+    ("location_group", "Location Group"),
     ("work_arrangement", "Work Arrangement"),
     ("seniority", "Seniority"),
     ("employment_type", "Employment Type"),
@@ -31,6 +33,9 @@ ALL_JOBS_COLUMNS: list[tuple[str, str]] = [
     ("salary_max", "Salary Max"),
     ("salary_midpoint", "Salary Midpoint"),
     ("visa_signal", "Visa Signal"),
+    ("visa_status", "Visa Status"),
+    ("visa_evidence", "Visa Evidence"),
+    ("visa_confidence", "Visa Confidence"),
     ("required_skills", "Required Skills"),
     ("preferred_skills", "Preferred Skills"),
     ("all_extracted_skills", "All Extracted Skills"),
@@ -52,6 +57,7 @@ LONG_TEXT_HEADERS = {
     "Reasoning Summary",
     "Example Matching Job Titles",
     "Visa Signal Summary",
+    "Visa Evidence",
 }
 CURRENCY_HEADERS = {
     "Salary Min",
@@ -61,6 +67,65 @@ CURRENCY_HEADERS = {
 }
 SCORE_HEADERS = {"Match Score", "Average Match Score", "Highest Match Score"}
 LINK_HEADERS = {"JD Post Link", "Apply Link"}
+
+MART_COLUMN_RENAMES: dict[str, str] = {
+    "category_name": "Category",
+    "jobs_found": "Jobs Found",
+    "excellent_matches": "Excellent Matches",
+    "strong_matches": "Strong Matches",
+    "good_matches": "Good Matches",
+    "average_match_score": "Average Match Score",
+    "average_salary_midpoint": "Average Salary Midpoint",
+    "remote_count": "Remote Count",
+    "hybrid_count": "Hybrid Count",
+    "onsite_count": "On-site Count",
+    "unknown_work_arrangement_count": "Unknown Work Arrangement Count",
+    "positive_visa_signal_count": "Positive Visa Signal Count",
+    "negative_visa_signal_count": "Negative Visa Signal Count",
+    "unknown_visa_signal_count": "Unknown Visa Signal Count",
+    "match_tier": "Match Tier",
+    "match_score": "Match Score",
+    "job_title": "Job Title",
+    "normalized_title": "Normalized Title",
+    "company": "Company",
+    "industry": "Industry",
+    "location": "Location",
+    "location_normalized": "Normalized Location",
+    "location_group": "Location Group",
+    "work_arrangement": "Work Arrangement",
+    "seniority": "Seniority",
+    "employment_type": "Employment Type",
+    "salary_range_text": "Salary Range",
+    "salary_min": "Salary Min",
+    "salary_max": "Salary Max",
+    "salary_midpoint": "Salary Midpoint",
+    "visa_signal": "Visa Signal",
+    "visa_status": "Visa Status",
+    "visa_evidence": "Visa Evidence",
+    "visa_confidence": "Visa Confidence",
+    "required_skills": "Required Skills",
+    "preferred_skills": "Preferred Skills",
+    "all_extracted_skills": "All Extracted Skills",
+    "jd_post_link": "JD Post Link",
+    "apply_link": "Apply Link",
+    "date_posted": "Date Posted",
+    "date_collected": "Date Collected",
+    "source": "Source",
+    "application_status": "Application Status",
+    "reasoning_summary": "Reasoning Summary",
+    "skill": "Skill",
+    "skill_group": "Skill Group",
+    "appears_in_job_count": "Appears In Job Count",
+    "appears_in_job_pct": "Appears In Job %",
+    "in_candidate_profile": "In Candidate Profile",
+    "gap_priority": "Gap Priority",
+    "example_matching_job_titles": "Example Matching Job Titles",
+    "matching_roles_count": "Matching Roles Count",
+    "highest_match_score": "Highest Match Score",
+    "best_matching_role": "Best Matching Role",
+    "visa_signal_summary": "Visa Signal Summary",
+    "priority": "Priority",
+}
 
 
 class ExcelExporter:
@@ -99,6 +164,52 @@ class ExcelExporter:
                 self._format_worksheet(worksheet)
 
         return path
+
+    def export_dataframes(
+        self,
+        sheets: dict[str, pd.DataFrame],
+        output_path: str | Path,
+    ) -> Path:
+        """Export prebuilt tab dataframes, typically from dbt mart tables."""
+
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        with pd.ExcelWriter(path, engine="openpyxl") as writer:
+            for sheet_name, dataframe in sheets.items():
+                display_df = self._mart_display_df(dataframe)
+                display_df.to_excel(writer, sheet_name=sheet_name, index=False)
+
+            workbook = writer.book
+            for worksheet in workbook.worksheets:
+                self._format_worksheet(worksheet)
+
+        return path
+
+    def _mart_display_df(self, dataframe: pd.DataFrame) -> pd.DataFrame:
+        if dataframe.empty:
+            return dataframe.rename(columns=MART_COLUMN_RENAMES)
+        display = dataframe.copy()
+        for column in ("required_skills", "preferred_skills", "all_extracted_skills"):
+            if column in display.columns:
+                display[column] = display[column].map(self._json_list_to_text)
+        return display.rename(columns=MART_COLUMN_RENAMES)
+
+    def _json_list_to_text(self, value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        text = value.strip()
+        if not text.startswith("["):
+            return value
+        try:
+            import json
+
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return value
+        if isinstance(parsed, list):
+            return ", ".join(str(item) for item in parsed)
+        return value
 
     def _build_all_jobs_df(self, jobs: list[dict[str, Any]]) -> pd.DataFrame:
         rows: list[dict[str, Any]] = []
