@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { ArrowRight, BarChart3, CheckCircle2, Database, Play, Sparkles } from "lucide-react";
 
+import { demoAction } from "@/app/(auth)/actions";
+
 const metrics = [
   ["Jobs Processed", "342", "+48 today"],
   ["Top Matches", "27", "8 excellent"],
   ["Skill Coverage", "86%", "SQL, Python, dbt"],
-  ["Refresh Status", "Ready", "6:00 AM ET window"]
+  ["Source Refresh", "Automatic", "Platform schedule"]
 ];
 
 const matches = [
@@ -26,35 +28,33 @@ export function HeroSection() {
             Job-search intelligence for high-fit decisions
           </div>
           <h1 className="text-4xl font-bold tracking-normal text-foreground md:text-6xl">
-            CareerSignal
+            CareerSignals
           </h1>
           <p className="mt-5 max-w-2xl text-xl leading-8 text-foreground">
             Turn scattered job postings into a scored, explainable, daily decision queue.
           </p>
           <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground">
-            CareerSignal combines connector ingestion, dbt-backed analytics models, FastAPI serving,
-            and a Next.js dashboard so job seekers can prioritize the right roles with credible data.
+            CareerSignals refreshes source job data automatically, then uses your personal configuration
+            to filter, categorize, and score the shared job universe—without exposing data credentials.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
-            <Link className="btn btn-primary" href="/dashboard">
-              Open Dashboard
+            <Link className="btn btn-primary" href="/register">
+              Create Account
               <ArrowRight className="h-4 w-4" />
             </Link>
-            <Link className="btn" href="/top-matches">
-              View Top Matches
-            </Link>
-            <Link className="btn" href="/settings">
-              <Play className="h-4 w-4" />
-              Run Pipeline
-            </Link>
+            <Link className="btn" href="/login">Log in</Link>
+            <form action={demoAction}><button className="btn" type="submit"><Play className="h-4 w-4" />Explore Demo</button></form>
           </div>
+          <p className="mt-3 text-sm text-muted-foreground">
+            Demo sign-in: Username <strong>demo</strong>; password not required. Demo results are fixed and read-only.
+          </p>
         </div>
 
         <div className="rounded-lg border border-border bg-white/90 p-4 shadow-soft backdrop-blur">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
             <div>
               <div className="text-xs font-semibold uppercase text-muted-foreground">
-                CareerSignal Intelligence Console
+                CareerSignals Intelligence Console
               </div>
               <div className="mt-1 text-lg font-bold text-foreground">Daily role review</div>
             </div>

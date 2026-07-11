@@ -1,4 +1,4 @@
-"""Run API ingestion, MotherDuck bridge writes, and dbt refresh."""
+"""Deprecated compatibility wrapper for the trusted shared Connector refresh."""
 
 from __future__ import annotations
 
@@ -46,65 +46,38 @@ try:
 except ImportError:  # pragma: no cover
     load_dotenv = None  # type: ignore[assignment]
 
-from src.main import run_pipeline
+from src.pipelines.shared_connector_refresh import run_shared_connector_refresh
 from src.utils.logging import configure_logging
 
 
 def _print_summary(summary: dict[str, Any]) -> None:
-    print("CareerSignal MotherDuck refresh completed.")
-    print(f"Run ID: {summary['run_id']}")
+    print("CareerSignal shared Connector refresh completed.")
+    print(f"Connector run UUID: {summary['connector_run_uuid']}")
     print(f"Fetched jobs: {summary['fetched_raw_jobs']}")
     print(f"Freshness filtered out: {summary['freshness_filtered_out']}")
     print(f"Raw jobs written: {summary['raw_jobs']}")
-    print(f"Processed jobs: {summary['total_jobs_processed']}")
-    print(f"Deduplicated jobs: {summary['deduplicated_jobs']}")
-    print(f"Top matches: {summary['top_matches']}")
-    if summary.get("output_path"):
-        print(f"Excel exported to: {Path(summary['output_path']).resolve()}")
-    else:
-        print("Excel export skipped.")
+    print(f"Shared jobs: {summary['shared_jobs']}")
+    print(f"dbt completed: {summary['dbt_completed']}")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the full CareerSignal MotherDuck refresh path."
+        description=(
+            "Deprecated name: run the shared system Connector refresh. "
+            "This command never runs user models."
+        )
     )
-    parser.add_argument(
-        "--incremental",
-        action="store_true",
-        help="Run dbt incrementally instead of using --full-refresh.",
-    )
-    parser.add_argument(
-        "--skip-dbt-tests",
-        action="store_true",
-        help="Skip dbt tests after dbt run.",
-    )
-    parser.add_argument(
-        "--sources",
-        help="Override JOB_SOURCES for this run, for example greenhouse,adzuna.",
-    )
-    parser.add_argument(
-        "--export-excel",
-        action="store_true",
-        help="Also write a timestamped Excel workbook to the local outputs directory.",
-    )
+    parser.add_argument("--connector-run-uuid")
     args = parser.parse_args()
 
     if load_dotenv is not None:
         load_dotenv(PROJECT_ROOT / ".env")
 
-    os.environ["CAREERSIGNAL_DATA_MODE"] = "motherduck"
-    os.environ["DBT_TARGET"] = "dev"
-    os.environ["CAREERSIGNAL_RUN_DBT"] = "true"
-    os.environ["CAREERSIGNAL_DBT_FULL_REFRESH"] = "false" if args.incremental else "true"
-    os.environ["CAREERSIGNAL_EXPORT_EXCEL"] = "true" if args.export_excel else "false"
-    if args.skip_dbt_tests:
-        os.environ["CAREERSIGNAL_RUN_DBT_TESTS"] = "false"
-    if args.sources:
-        os.environ["JOB_SOURCES"] = args.sources
-
     configure_logging()
-    summary = run_pipeline(PROJECT_ROOT)
+    summary = run_shared_connector_refresh(
+        args.connector_run_uuid,
+        project_root=PROJECT_ROOT,
+    )
     _print_summary(summary)
 
 

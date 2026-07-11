@@ -19,7 +19,10 @@ def normalize_raw_job(
 ) -> dict[str, Any]:
     """Normalize a raw source record into the CareerSignal job schema."""
 
-    source = clean_text(raw_job.get("source") or "unknown")
+    source = clean_text(raw_job.get("_careersignal_source") or raw_job.get("source") or "unknown")
+    source_job_id = clean_text(
+        raw_job.get("external_id") or raw_job.get("source_job_id") or raw_job.get("id")
+    ) or None
     job_title = clean_text(raw_job.get("job_title") or raw_job.get("title"))
     company = clean_text(raw_job.get("company") or raw_job.get("company_name"))
     location = clean_text(raw_job.get("location") or raw_job.get("job_location") or "Unknown")
@@ -40,10 +43,12 @@ def normalize_raw_job(
     normalized = NormalizedJob(
         job_id=job_id,
         source=source,
+        source_job_id=source_job_id,
         category_name=category_config.category_name,
         job_title=job_title,
         normalized_title=normalize_title(job_title),
         company=company,
+        normalized_company=company.casefold(),
         industry=clean_text(raw_job.get("industry") or "Unknown") or "Unknown",
         location=location,
         location_normalized=location_result.normalized,
@@ -56,9 +61,11 @@ def normalize_raw_job(
         salary_midpoint=salary_result.salary_midpoint,
         salary_range_text=salary_result.salary_range_text,
         date_posted=clean_text(raw_job.get("date_posted")) or None,
+        posted_at=clean_text(raw_job.get("posted_at") or raw_job.get("date_posted")) or None,
         date_collected=date_collected or datetime.now().date().isoformat(),
         jd_post_link=jd_post_link,
         apply_link=apply_link,
         job_description=description,
+        normalized_description=description.casefold(),
     )
     return normalized.to_dict()

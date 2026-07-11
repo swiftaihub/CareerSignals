@@ -1,45 +1,99 @@
 version: 2
 
 models:
-  - name: mart_jobs_scored
+  - name: mart_shared_canonical_jobs
+    description: Candidate-independent canonical shared jobs.
     columns:
       - name: job_id
-        tests:
+        data_tests: [not_null, unique]
+      - name: connector_run_uuid
+        data_tests: [not_null]
+      - name: title
+        data_tests: [not_null]
+
+  - name: mart_shared_source_freshness
+    columns:
+      - name: source
+        data_tests: [not_null, unique]
+
+  - name: mart_jobs_scored
+    description: Immutable user/run scored job partition.
+    columns:
+      - name: user_uuid
+        data_tests: [not_null]
+      - name: run_uuid
+        data_tests: [not_null]
+      - name: job_id
+        data_tests:
           - not_null
-          - unique
+          - relationships:
+              arguments:
+                to: ref('mart_shared_canonical_jobs')
+                field: job_id
       - name: job_title
-        tests:
-          - not_null
-      - name: company
-        tests:
-          - not_null
+        data_tests: [not_null]
       - name: match_score
-        tests:
-          - not_null
+        data_tests: [not_null]
+      - name: title_score
+        data_tests: [not_null]
+      - name: required_skill_score
+        data_tests: [not_null]
+      - name: industry_score
+        data_tests: [not_null]
+      - name: salary_score
+        data_tests: [not_null]
+      - name: work_arrangement_score
+        data_tests: [not_null]
+      - name: visa_score
+        data_tests: [not_null]
+      - name: match_tier
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["Excellent Match", "Strong Match", "Good Match", "Possible Match", "Low Priority"]
       - name: visa_signal
-        tests:
+        data_tests:
           - accepted_values:
               arguments:
                 values: ["Positive", "Negative", "Unknown"]
-      - name: visa_status
-        tests:
-          - accepted_values:
-              arguments:
-                values: ["Sponsorship Available", "No Sponsorship", "U.S. Citizenship Required", "Permanent Work Authorization Required", "Unknown"]
       - name: application_status
-        tests:
+        data_tests:
           - accepted_values:
               arguments:
                 values: ["Not Applied", "Saved", "Applied", "Interview", "Rejected", "Offer", "Archived"]
 
   - name: mart_top_matches
     columns:
+      - name: user_uuid
+        data_tests: [not_null]
+      - name: run_uuid
+        data_tests: [not_null]
       - name: job_id
-        tests:
-          - not_null
+        data_tests: [not_null]
 
   - name: mart_category_summary
     columns:
+      - name: user_uuid
+        data_tests: [not_null]
+      - name: run_uuid
+        data_tests: [not_null]
       - name: category_name
-        tests:
-          - not_null
+        data_tests: [not_null]
+
+  - name: mart_skill_gap_analysis
+    columns:
+      - name: user_uuid
+        data_tests: [not_null]
+      - name: run_uuid
+        data_tests: [not_null]
+      - name: skill
+        data_tests: [not_null]
+
+  - name: mart_company_priority_list
+    columns:
+      - name: user_uuid
+        data_tests: [not_null]
+      - name: run_uuid
+        data_tests: [not_null]
+      - name: company
+        data_tests: [not_null]

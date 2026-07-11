@@ -9,6 +9,25 @@ export type ApplicationStatus =
 
 export type SortOrder = "asc" | "desc";
 
+export type UserRole = "user" | "admin" | "demo";
+export type AccountStatus = "pending" | "active" | "expired" | "suspended" | "deleted";
+
+export interface CurrentUser {
+  user_uuid: string;
+  username: string;
+  email?: string | null;
+  role: UserRole;
+  account_status: AccountStatus;
+  created_at: string;
+  activated_at?: string | null;
+  expires_at?: string | null;
+  remaining_days?: number | null;
+  last_login_at?: string | null;
+  last_activity_at?: string | null;
+  last_successful_pipeline_run_uuid?: string | null;
+  is_demo: boolean;
+}
+
 export interface Job {
   job_id: string;
   category_name?: string | null;
@@ -191,6 +210,48 @@ export interface ApiError {
   resets_at?: string;
 }
 
+export type ConfigType = "candidate_profile" | "jobs_config" | "skill_taxonomy";
+
+export interface ConfigSummary {
+  config_type: ConfigType;
+  revision: number;
+  updated_at?: string | null;
+  is_overridden?: boolean;
+}
+
+export interface ConfigDocument extends ConfigSummary {
+  default_config: Record<string, unknown>;
+  override_config: Record<string, unknown>;
+  effective_config: Record<string, unknown>;
+  field_sources: Record<string, "default" | "override" | string>;
+}
+
+export interface ConfigVersion {
+  revision: number;
+  override_config: Record<string, unknown>;
+  change_source?: string;
+  created_at: string;
+}
+
+export interface DataFreshnessSource {
+  source_name: string;
+  last_successful_refresh_at?: string | null;
+  records_retained?: number;
+  status: string;
+  public_status_message?: string | null;
+}
+
+export interface DataFreshness {
+  overall: {
+    last_successful_refresh_at?: string | null;
+    next_scheduled_refresh_at?: string | null;
+    data_as_of?: string | null;
+    is_stale: boolean;
+    status: string;
+  };
+  sources: DataFreshnessSource[];
+}
+
 export interface ActionResponse {
   status: string;
   output_path?: string;
@@ -212,7 +273,7 @@ export interface PipelineRunMessage {
   message: string;
 }
 
-export type PipelineRunState = "queued" | "running" | "completed" | "failed";
+export type PipelineRunState = "queued" | "running" | "completed" | "failed" | "cancelled";
 
 export interface PipelineRunStatus {
   run_id: string;
@@ -222,4 +283,113 @@ export interface PipelineRunStatus {
   messages: PipelineRunMessage[];
   summary?: Record<string, unknown> | null;
   quota?: PipelineQuota;
+}
+
+export interface UserPipelineRunEvent {
+  event_uuid?: string;
+  event_level: string;
+  event_type?: string;
+  message: string;
+  created_at: string;
+}
+
+export interface UserPipelineRun {
+  run_uuid: string;
+  status: PipelineRunState | string;
+  submitted_at: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  published_at?: string | null;
+  config_hash?: string;
+  jobs_considered?: number;
+  jobs_matched?: number;
+  public_error_message?: string | null;
+  events?: UserPipelineRunEvent[];
+  is_current_result?: boolean;
+}
+
+export interface PipelineRunList {
+  items: UserPipelineRun[];
+  total?: number;
+}
+
+export interface ExcelExportResponse {
+  export_uuid?: string;
+  status: string;
+  download_url?: string;
+  expires_at?: string;
+}
+
+export interface TimeSeriesPoint {
+  date?: string;
+  hour?: number;
+  label?: string;
+  value?: number;
+  count?: number;
+  successful?: number;
+  failed?: number;
+  total?: number;
+}
+
+export interface AdminMetrics {
+  total_registered_users: number;
+  new_registered_users: number;
+  pending_users: number;
+  active_users: number;
+  expired_users: number;
+  suspended_users?: number;
+  estimated_mrr_cents: number;
+  actual_monthly_revenue_cents: number;
+  total_revenue_cents: number;
+  pipeline_success_rate: number;
+  average_pipeline_duration_seconds?: number;
+  registrations_by_day?: TimeSeriesPoint[];
+  active_users_by_day?: TimeSeriesPoint[];
+  activity_by_hour?: TimeSeriesPoint[];
+  pipeline_runs_by_day?: TimeSeriesPoint[];
+  revenue_events_by_day?: TimeSeriesPoint[];
+  expiration_outlook?: TimeSeriesPoint[];
+}
+
+export interface AdminUser {
+  user_uuid: string;
+  username: string;
+  email?: string | null;
+  role: UserRole;
+  account_status: AccountStatus;
+  created_at: string;
+  activated_at?: string | null;
+  expires_at?: string | null;
+  remaining_days?: number | null;
+  last_login_at?: string | null;
+  last_activity_at?: string | null;
+  last_successful_pipeline_run_uuid?: string | null;
+}
+
+export interface AdminUserList {
+  items: AdminUser[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface AdminActionResponse {
+  detail: string;
+}
+
+export interface AdminAuditLog {
+  audit_uuid?: string;
+  admin_user_uuid?: string;
+  target_user_uuid?: string | null;
+  action: string;
+  details?: Record<string, unknown>;
+  created_at: string;
+  request_id?: string | null;
+}
+
+export interface AdminAuditList {
+  items: AdminAuditLog[];
+  total: number;
+  page: number;
+  page_size: number;
 }

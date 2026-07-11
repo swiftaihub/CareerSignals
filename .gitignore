@@ -229,6 +229,7 @@ outputs/*.xlsx
 !apps/web/package.json
 !apps/web/package-lock.json
 !apps/web/tsconfig.json
+!data/demo/demo_jobs.json
 
 # Node / Next.js local artifacts
 node_modules/
@@ -242,3 +243,6 @@ apps/web/.next/
 
 # dbt local user state
 dbt/.user.yml
+
+# Supabase CLI linked-project and runtime state
+supabase/.temp/

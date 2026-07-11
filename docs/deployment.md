@@ -1,0 +1,179 @@
+# Production deployment and operations
+
+This runbook covers the hosted CareerSignals SaaS topology. `docker-compose.yml` is a local-development convenience, not the production image or orchestration definition.
+
+## Runtime topology
+
+Deploy each process independently from the same immutable application revision:
+
+| Process | Command | Public | Scaling rule |
+| --- | --- | --- | --- |
+| Next.js web | `cd apps/web && npm run start` | Yes, behind TLS | Horizontal; keep the same auth/cookie environment on every replica |
+| FastAPI | `uvicorn apps.api.main:app --host 0.0.0.0 --port 8000` | Only through the web/BFF or an API gateway | Horizontal after using a shared rate-limit store |
+| User worker | `python -m apps.worker.main` | No | Queue claims and advisory locks protect work; start with concurrency 1 |
+| Shared scheduler | `python -m apps.scheduler.main` | No | Exactly one logical scheduler |
+
+Supabase PostgreSQL/Auth and MotherDuck are managed external dependencies. Do not deploy a local MotherDuck server. Do not start the scheduler in an API process.
+
+## Secrets and configuration
+
+Use the hosting platform's encrypted secret manager. Do not bake secrets into images, frontend build arguments, Compose files, migrations, or logs.
+
+Backend-only secrets include:
+
+- `DATABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `MOTHERDUCK_TOKEN`
+- `DEMO_SESSION_SECRET`
+- `ADMIN_BOOTSTRAP_PASSWORD` (bootstrap only; remove after use)
+- Adzuna, SerpApi, and USAJOBS credentials
+- `SCHEDULER_INTERNAL_SECRET` if a trusted internal trigger is added
+
+`NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` are browser project metadata. No other credential may use a `NEXT_PUBLIC_` prefix. `API_BASE_URL` must be server-only and point to the private FastAPI origin.
+
+Production settings must include:
+
+```dotenv
+CAREERSIGNAL_SAAS_MODE=true
+CAREERSIGNAL_ENVIRONMENT=production
+CAREERSIGNAL_DATA_MODE=postgres
+CORS_ORIGINS=https://app.example.com
+USER_PIPELINE_MAX_CONCURRENCY=1
+CONNECTOR_REFRESH_TIMEZONE=UTC
+DEMO_USER_UUID=00000000-0000-4000-8000-000000000020
+```
+
+Generate `DEMO_SESSION_SECRET` with a cryptographically secure random generator. Rotate it to revoke all outstanding Demo tokens. Configure the exact Supabase issuer/audience/JWKS endpoint for the project; do not disable JWT signature, issuer, audience, or expiry validation.
+
+## Supabase production controls
+
+Before launch:
+
+1. Require TLS for database and web connections.
+2. Restrict database network access to application and administrative networks where the platform supports it.
+3. Keep the service-role key in backend processes only.
+4. Apply all RLS migrations and run the real two-user/anonymous/Admin integration suite.
+5. Configure allowed Auth redirect URLs to the production web origin only.
+6. Set appropriate email delivery and password-reset templates.
+7. Verify no Demo `auth.users` row exists; Demo uses the fixed application profile and signed API session.
+8. Enable provider logs and point-in-time recovery according to the service tier.
+
+The Next.js session cookies are HTTP-only, `Secure` in production, `SameSite=Lax`, and refreshed by `proxy.ts`. TLS termination must preserve the original HTTPS host so same-origin mutation checks compare against the public origin correctly.
+
+## Release procedure
+
+### 1. Build and validate
+
+Run from a clean checkout of the release revision:
+
+```bash
+python -m pip install -r requirements.txt
+pytest
+
+cd apps/web
+npm ci
+npm run test
+npm run lint
+npm run build
+cd ../..
+
+cd dbt
+dbt deps
+dbt compile --profiles-dir .
+cd ..
+```
+
+Run shared/user dbt builds against a non-production database and run the RLS integration suite with two normal test users. Treat skipped external integration tests as unverified, not passing.
+
+### 2. Back up and migrate
+
+1. Record the currently deployed application revision and migration list.
+2. Take and verify a Supabase/PostgreSQL backup or recovery point.
+3. Run `supabase db push --dry-run` against the linked target.
+4. Review the SQL diff and confirm the project reference.
+5. Apply `supabase db push` during the release window.
+6. Run migration/RLS smoke tests before enabling new writers.
+
+Migrations are forward-only. Follow [database migrations and rollback](database/migrations.md); never run `supabase db reset` against a shared or production project.
+
+### 3. Deploy in compatibility order
+
+1. Apply backward-compatible database migrations.
+2. Deploy FastAPI.
+3. Deploy the user worker, initially with one replica/writer slot.
+4. Deploy the single scheduler.
+5. Deploy Next.js.
+6. Run the smoke checks below.
+
+Bootstrap Admin once, if needed, then remove `ADMIN_BOOTSTRAP_PASSWORD` from the runtime environment. Run `python scripts/seed_demo.py` idempotently when the Demo fixture changes.
+
+### 4. Smoke checks
+
+- Public Home and pricing load without a session.
+- An unauthenticated Dashboard request redirects to login.
+- Active, pending, expired, and suspended accounts receive the intended route/API behavior.
+- Demo opens without a password and has exactly 20 jobs.
+- Demo status/config/Pipeline/export mutations are rejected.
+- A normal user cannot open Admin routes or APIs.
+- Admin metrics, user pagination, lifecycle actions, and audit logs load.
+- `GET /api/data-freshness` contains no internal error field.
+- A user Pipeline queues with `202`, never invokes a Connector, completes, and switches only that user's partition.
+- A deliberate failed publication leaves the prior current partition unchanged.
+- `/api/pipeline/run`, `/api/dbt/run`, and `/api/dbt/test` are absent or return `410`.
+
+## Health and monitoring
+
+`GET /api/health` is a process liveness check. Add deployment-specific readiness checks for PostgreSQL and, where appropriate, MotherDuck before routing traffic. Do not put secrets or internal exception messages in health responses.
+
+Alert on:
+
+- API 5xx and authentication-error changes by error code
+- request latency and saturation
+- queued-run age, failed-run rate, and average user Pipeline duration
+- worker heartbeat and repeated lock failures
+- last successful shared refresh and source-level stale/partial status
+- scheduler missed runs
+- MotherDuck/dbt failures
+- PostgreSQL connections, storage, locks, and replication/backup health
+- unusual Admin mutation volume and audit-write failures
+
+Logs should contain a request ID, service, severity, and safe identifiers such as run UUID. Never log access/refresh tokens, authorization headers, database URLs, Connector payload credentials, config documents containing secrets, or internal errors to browser-visible channels.
+
+The current SlowAPI configuration uses process-local rate-limit state. Before running multiple API replicas, configure a shared rate-limit backend (for example Redis) at the gateway or application layer so login, registration, Pipeline, and Admin mutation limits are globally consistent.
+
+## Backups and restore
+
+Back up these systems independently:
+
+- Supabase PostgreSQL: authoritative users, configuration, entitlements, queue, serving results, statuses, billing placeholders, and audit history
+- MotherDuck: shared raw/analytical state and dbt computation tables
+- deployment secret configuration: through the platform's secret/version system, never source control
+- immutable release artifacts and migration revision
+
+At least quarterly, restore a backup into an isolated project and verify migrations, RLS, Demo seed, current result uniqueness, and API smoke tests. A backup that has not been restored and tested is not a verified recovery point.
+
+Restore procedure:
+
+1. Stop scheduler and worker writers; place user mutations in maintenance mode.
+2. Restore PostgreSQL into a new isolated target.
+3. Restore/reconnect MotherDuck state compatible with the selected release.
+4. rotate credentials used during recovery.
+5. Run schema, RLS, two-user, Demo, publication, and Admin authorization checks.
+6. Point services to the recovered targets and deploy the matching application revision.
+7. Resume worker first, then scheduler, while monitoring queue/freshness state.
+
+## Rollback
+
+For an application-only regression, roll API/worker/scheduler/web back to the previously recorded compatible image and leave the forward-compatible schema in place. Do not drop columns or tables during an emergency rollback.
+
+For a destructive or incompatible migration failure, stop all writers and restore the verified pre-migration backup into a new database/project. Validate it before changing production connection strings. Preserve the failed environment for investigation.
+
+For a bad shared refresh, stop the scheduler, preserve Connector run records, and restore or republish the last validated shared partition. For a failed user refresh, the publication transaction must already have preserved that user's prior current result; investigate the failed `run_uuid` without manually changing another user's rows.
+
+## Scaling notes
+
+- PostgreSQL `FOR UPDATE SKIP LOCKED` supports multiple worker processes, while per-user/global advisory locks prevent duplicate work.
+- MotherDuck write concurrency is separately constrained. Increase `USER_PIPELINE_MAX_CONCURRENCY` only after load and failure testing.
+- Run one scheduler leader. Multiple uncoordinated scheduler processes can submit duplicate global refresh attempts even though the global lock prevents simultaneous execution.
+- Keep web and API clocks synchronized with UTC; format dates for locale only in the browser.
+- Use a CDN only for static Next.js assets. Do not publicly cache authenticated BFF or API responses.

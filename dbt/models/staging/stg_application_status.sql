@@ -1,20 +1,22 @@
+{% do require_user_context() %}
 {{ config(
     materialized='incremental',
     schema='staging',
-    unique_key=['user_id', 'job_id'],
+    unique_key=['user_uuid', 'run_uuid', 'job_id', 'updated_at'],
     incremental_strategy='delete+insert',
     on_schema_change='sync_all_columns',
-    tags=['staging', 'motherduck', 'incremental']
+    pre_hook="{{ delete_user_partition() }}",
+    post_hook="{{ purge_unscoped_user_rows() }}",
+    tags=['user', 'staging', 'motherduck']
 ) }}
 
 select
-    user_id,
+    coalesce(user_uuid, user_id) as user_uuid,
+    '{{ var("run_uuid") }}' as run_uuid,
     job_id,
     application_status,
     notes,
     updated_at
 from {{ source('app', 'job_application_status') }}
-where job_id is not null
-{% if is_incremental() %}
-  and updated_at >= coalesce((select max(updated_at) from {{ this }}), timestamp '1900-01-01')
-{% endif %}
+where coalesce(user_uuid, user_id) = '{{ var("user_uuid") }}'
+  and job_id is not null

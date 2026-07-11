@@ -11,11 +11,10 @@ function formatTime(value?: string | null) {
   if (Number.isNaN(date.getTime())) {
     return value;
   }
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat(undefined, {
     hour: "numeric",
     minute: "2-digit",
-    second: "2-digit",
-    timeZone: "America/New_York"
+    second: "2-digit"
   }).format(date);
 }
 
@@ -107,9 +106,8 @@ export function PipelineRunTimeline({ run }: { run?: PipelineRunStatus | null })
 
       {run?.summary ? (
         <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <SummaryValue label="Fetched" value={run.summary.fetched_raw_jobs} />
-          <SummaryValue label="Processed" value={run.summary.total_jobs_processed} />
-          <SummaryValue label="Deduped" value={run.summary.deduplicated_jobs} />
+          <SummaryValue label="Jobs Considered" value={run.summary.jobs_considered} />
+          <SummaryValue label="Jobs Matched" value={run.summary.jobs_matched} />
           <SummaryValue label="Top Matches" value={run.summary.top_matches} />
         </div>
       ) : null}

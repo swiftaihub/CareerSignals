@@ -25,7 +25,8 @@ export function JobDetailDrawer({
   notes,
   onNotesChange,
   onClose,
-  onStatusChange
+  onStatusChange,
+  readOnly = false
 }: {
   job: Job | null;
   open: boolean;
@@ -34,6 +35,7 @@ export function JobDetailDrawer({
   onNotesChange: (notes: string) => void;
   onClose: () => void;
   onStatusChange: (job: Job, status: string, notes?: string) => Promise<void>;
+  readOnly?: boolean;
 }) {
   if (!open || !job) {
     return null;
@@ -121,11 +123,11 @@ export function JobDetailDrawer({
               <div>
                 <h3 className="text-sm font-semibold text-foreground">Application Workflow</h3>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Status is stored for the personal user profile.
+                  {readOnly ? "Demo application workflow is read-only." : "Status is stored for your personal user profile."}
                 </p>
               </div>
               <ApplicationStatusSelect
-                disabled={updating}
+                disabled={readOnly || updating}
                 value={job.application_status}
                 onChange={(value) => onStatusChange(job, value, notes)}
               />
@@ -136,6 +138,7 @@ export function JobDetailDrawer({
                 className="textarea mt-1 normal-case"
                 placeholder="Add application notes, recruiter context, or next steps."
                 value={notes}
+                disabled={readOnly}
                 onChange={(event) => onNotesChange(event.target.value)}
               />
             </label>

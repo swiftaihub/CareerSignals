@@ -11,18 +11,19 @@ function refreshLabel(remaining: number) {
 
 function resetDate(value?: string) {
   if (!value) {
-    return "6:00 AM ET";
+    return "the configured quota window";
   }
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    return "6:00 AM ET";
+    return "the configured quota window";
   }
-  const day = new Intl.DateTimeFormat("en-US", {
+  const day = new Intl.DateTimeFormat(undefined, {
     month: "short",
     day: "numeric",
-    timeZone: "America/New_York"
+    hour: "numeric",
+    minute: "2-digit"
   }).format(date);
-  return `${day} at 6:00 AM ET`;
+  return day;
 }
 
 export function PipelineQuotaCard({ quota }: { quota?: PipelineQuota | null }) {
@@ -35,14 +36,14 @@ export function PipelineQuotaCard({ quota }: { quota?: PipelineQuota | null }) {
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="text-xs font-semibold uppercase text-muted-foreground">
-            Pipeline Refresh Quota
+            Personal Pipeline Quota
           </div>
           <div className="mt-2 text-2xl font-bold text-foreground">
             {remaining === 0 ? "0 refreshes available" : refreshLabel(remaining)}
           </div>
           <p className="mt-2 text-sm text-muted-foreground">
             {remaining === 0
-              ? "Refreshes reset at 6:00 AM ET."
+              ? "No personal refreshes remain in the current quota window."
               : `${used} of ${limit} refreshes used in the current window.`}
           </p>
         </div>

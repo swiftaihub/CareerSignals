@@ -1,12 +1,12 @@
 import { ArrowRight, ShieldCheck } from "lucide-react";
 
 const flow = [
-  "Connector APIs",
-  "Raw ingestion",
-  "dbt models",
-  "FastAPI",
-  "Next.js dashboard",
-  "Excel/export"
+  "Scheduled shared connectors",
+  "Canonical job universe",
+  "Personal config snapshot",
+  "User-scoped dbt models",
+  "FastAPI + RLS",
+  "Protected dashboard"
 ];
 
 export function ArchitectureSection() {
@@ -19,8 +19,8 @@ export function ArchitectureSection() {
             A clean path from noisy postings to trusted decisions.
           </h2>
           <p className="mt-4 text-base leading-7 text-muted-foreground">
-            The dashboard never reaches into MotherDuck, local workbooks, or secrets. FastAPI owns
-            the service boundary and returns product-ready data contracts to the frontend.
+              Scheduled connector refresh and user-triggered personal matching are separate pipelines.
+              FastAPI owns the secure service boundary and returns user-scoped data to the frontend.
           </p>
           <div className="mt-6 rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
             <div className="flex items-center gap-2 font-semibold">

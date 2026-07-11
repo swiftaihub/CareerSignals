@@ -2,7 +2,7 @@ export function formatCurrency(value?: number | null) {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return "Not listed";
   }
-  return new Intl.NumberFormat("en-US", {
+  return new Intl.NumberFormat(undefined, {
     style: "currency",
     currency: "USD",
     maximumFractionDigits: 0
@@ -14,7 +14,7 @@ export function formatPercent(value?: number | null) {
     return "0%";
   }
   const normalized = value > 1 ? value / 100 : value;
-  return new Intl.NumberFormat("en-US", {
+  return new Intl.NumberFormat(undefined, {
     style: "percent",
     maximumFractionDigits: 1
   }).format(normalized);
@@ -35,7 +35,7 @@ export function formatDate(value?: string | null) {
   if (Number.isNaN(date.getTime())) {
     return value;
   }
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat(undefined, {
     month: "short",
     day: "numeric",
     year: "numeric"
@@ -50,13 +50,12 @@ export function formatDateTime(value?: string | null) {
   if (Number.isNaN(date.getTime())) {
     return value;
   }
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat(undefined, {
     month: "short",
     day: "numeric",
     year: "numeric",
     hour: "numeric",
-    minute: "2-digit",
-    timeZone: "America/New_York"
+    minute: "2-digit"
   }).format(date);
 }
 
