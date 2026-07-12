@@ -319,6 +319,13 @@ dbt build --selector user_refresh --profiles-dir . \
   --vars '{"user_uuid":"TEST_UUID","run_uuid":"TEST_RUN_UUID"}'
 ```
 
+
+docker:
+
+```bash
+docker compose up -d --force-recreate api worker scheduler
+```
+
 RLS and two-user tests require real Supabase test credentials from the non-committed `.env`. Skipped integration tests are not equivalent to a pass; inspect the Pytest skip report.
 
 ## Production
