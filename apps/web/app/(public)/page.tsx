@@ -1,18 +1,20 @@
-import { ArchitectureSection } from "@/components/home/architecture-section";
 import { FinalCta } from "@/components/home/final-cta";
 import { HeroSection } from "@/components/home/hero-section";
-import { TechStackSection } from "@/components/home/tech-stack-section";
-import { UseCasesSection } from "@/components/home/use-cases-section";
-import { ValueSection } from "@/components/home/value-section";
+import { HowItWorksSection } from "@/components/home/how-it-works-section";
+import { NoiseToSignalSection } from "@/components/home/noise-to-signal-section";
+import { ProductPreviewSection } from "@/components/home/product-preview-section";
+import { SuccessOutcomeSection } from "@/components/home/success-outcome-section";
+import { TrustSection } from "@/components/home/trust-section";
 
 export default function HomePage() {
   return (
-    <main>
+    <main className="overflow-hidden">
       <HeroSection />
-      <ValueSection />
-      <TechStackSection />
-      <ArchitectureSection />
-      <UseCasesSection />
+      <NoiseToSignalSection />
+      <HowItWorksSection />
+      <ProductPreviewSection />
+      <TrustSection />
+      <SuccessOutcomeSection />
       <FinalCta />
     </main>
   );

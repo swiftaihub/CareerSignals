@@ -1,118 +1,65 @@
+import Image from "next/image";
 import Link from "next/link";
-import { ArrowRight, BarChart3, CheckCircle2, Database, Play, Sparkles } from "lucide-react";
+import { ArrowRight, CheckCircle2, LogIn, Play, Sparkles } from "lucide-react";
 
 import { demoAction } from "@/app/(auth)/actions";
 
-const metrics = [
-  ["Jobs Processed", "342", "+48 today"],
-  ["Top Matches", "27", "8 excellent"],
-  ["Skill Coverage", "86%", "SQL, Python, dbt"],
-  ["Source Refresh", "Automatic", "Platform schedule"]
-];
-
-const matches = [
-  ["Senior Analytics Engineer", "Fintech platform", "94"],
-  ["Product Data Scientist", "AI workflow suite", "91"],
-  ["Credit Risk Analyst", "Banking analytics", "86"]
-];
-
-const flow = ["Ingest", "Model", "Score", "Review"];
+import { FloatingProductPreview } from "./floating-product-preview";
+import { HOME_ROUTES } from "./home-content";
 
 export function HeroSection() {
   return (
-    <section className="landing-mesh surface-grid relative overflow-hidden border-b border-border">
-      <div className="mx-auto grid max-w-7xl gap-10 px-4 pb-12 pt-14 md:px-6 lg:grid-cols-[0.95fr_1.05fr] lg:px-8 lg:pb-16 lg:pt-20">
-        <div className="flex flex-col justify-center">
-          <div className="mb-4 inline-flex w-fit items-center gap-2 rounded-full border border-teal-200 bg-white/80 px-3 py-1 text-xs font-semibold text-teal-800 shadow-sm">
-            <Sparkles className="h-3.5 w-3.5" />
-            Job-search intelligence for high-fit decisions
+    <section className="landing-hero landing-mesh surface-grid relative overflow-hidden border-b border-slate-200/70">
+      <div className="hero-orb hero-orb-one" aria-hidden="true" />
+      <div className="hero-orb hero-orb-two" aria-hidden="true" />
+      <div className="mx-auto grid max-w-[90rem] gap-12 px-4 pb-20 pt-14 sm:px-6 lg:grid-cols-[0.88fr_1.12fr] lg:items-center lg:px-10 lg:pb-24 lg:pt-20 xl:gap-16">
+        <div className="relative z-10 max-w-2xl">
+          <div className="hero-enter hero-delay-1 section-eyebrow">
+            <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+            Personalized job intelligence
           </div>
-          <h1 className="text-4xl font-bold tracking-normal text-foreground md:text-6xl">
-            CareerSignals
+          <h1 className="hero-enter hero-delay-2 mt-5 text-balance text-[clamp(2.65rem,6vw,5.6rem)] font-bold leading-[0.96] tracking-[-0.055em] text-slate-950">
+            Find the roles worth your time.
           </h1>
-          <p className="mt-5 max-w-2xl text-xl leading-8 text-foreground">
-            Turn scattered job postings into a scored, explainable, daily decision queue.
+          <p className="hero-enter hero-delay-3 mt-6 max-w-xl text-pretty text-base leading-7 text-slate-600 sm:text-lg sm:leading-8">
+            CareerSignals turns scattered job postings into a ranked, explainable queue built around your skills,
+            goals, and preferences—so you can spend less time searching and more time applying with confidence.
           </p>
-          <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground">
-            CareerSignals refreshes source job data automatically, then uses your personal configuration
-            to filter, categorize, and score the shared job universe—without exposing data credentials.
-          </p>
-          <div className="mt-8 flex flex-wrap gap-3">
-            <Link className="btn btn-primary" href="/register">
-              Create Account
-              <ArrowRight className="h-4 w-4" />
+          <div className="hero-enter hero-delay-4 mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+            <Link className="btn btn-primary landing-cta sm:h-12 sm:px-5" href={HOME_ROUTES.register}>
+              Create your profile
+              <ArrowRight className="h-4 w-4" aria-hidden="true" />
             </Link>
-            <Link className="btn" href="/login">Log in</Link>
-            <form action={demoAction}><button className="btn" type="submit"><Play className="h-4 w-4" />Explore Demo</button></form>
+            <form action={demoAction}>
+              <button className="btn landing-cta w-full sm:h-12 sm:w-auto sm:px-5" type="submit">
+                <Play className="h-4 w-4 fill-current" aria-hidden="true" />
+                Explore live demo
+              </button>
+            </form>
+            <Link className="btn btn-ghost landing-cta sm:h-12 sm:px-4" href={HOME_ROUTES.login}>
+              <LogIn className="h-4 w-4" aria-hidden="true" />
+              Log in
+            </Link>
           </div>
-          <p className="mt-3 text-sm text-muted-foreground">
-            Demo sign-in: Username <strong>demo</strong>; password not required. Demo results are fixed and read-only.
+          <p className="hero-enter hero-delay-5 mt-7 flex max-w-xl items-start gap-2 text-sm leading-6 text-slate-600">
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-teal-700" aria-hidden="true" />
+            Fresh job data. Personal matching. Clear reasons behind every score.
           </p>
         </div>
 
-        <div className="rounded-lg border border-border bg-white/90 p-4 shadow-soft backdrop-blur">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
-            <div>
-              <div className="text-xs font-semibold uppercase text-muted-foreground">
-                CareerSignals Intelligence Console
-              </div>
-              <div className="mt-1 text-lg font-bold text-foreground">Daily role review</div>
-            </div>
-            <div className="badge border-emerald-200 bg-emerald-50 text-emerald-800">
-              <CheckCircle2 className="h-3.5 w-3.5" />
-              Pipeline ready
-            </div>
+        <div className="hero-visual-enter relative mx-auto w-full max-w-3xl">
+          <div className="hero-illustration-shell">
+            <Image
+              alt="Professional using CareerSignals beside floating job match cards and analytics"
+              className="hero-illustration"
+              height={1024}
+              priority
+              sizes="(max-width: 1023px) 94vw, 55vw"
+              src="/illustrations/hero-career-dashboard.webp"
+              width={1536}
+            />
           </div>
-
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            {metrics.map(([label, value, detail]) => (
-              <div key={label} className="rounded-md border border-border bg-background/90 p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-xs font-semibold uppercase text-muted-foreground">{label}</div>
-                  <BarChart3 className="h-3.5 w-3.5 text-primary" />
-                </div>
-                <div className="mt-2 text-2xl font-bold text-foreground">{value}</div>
-                <div className="mt-1 truncate text-xs text-muted-foreground">{detail}</div>
-              </div>
-            ))}
-          </div>
-
-          <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_0.65fr]">
-            <div className="rounded-md border border-border bg-background/90 p-3">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <div className="text-xs font-semibold uppercase text-muted-foreground">Top match queue</div>
-                <span className="text-xs font-medium text-primary">Sorted by fit</span>
-              </div>
-              <div className="space-y-2">
-                {matches.map(([role, company, score]) => (
-                  <div key={role} className="flex items-center justify-between gap-3 rounded-md bg-white px-3 py-2">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold text-foreground">{role}</div>
-                      <div className="truncate text-xs text-muted-foreground">{company}</div>
-                    </div>
-                    <div className="badge shrink-0 border-teal-200 bg-teal-50 text-teal-800">{score}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-md border border-border bg-foreground p-3 text-background">
-              <div className="flex items-center gap-2 text-xs font-semibold uppercase text-teal-100">
-                <Database className="h-3.5 w-3.5" />
-                Pipeline Flow
-              </div>
-              <div className="mt-4 space-y-2">
-                {flow.map((stage, index) => (
-                  <div key={stage} className="flex items-center gap-2 text-sm">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-teal-400 text-xs font-bold text-slate-950">
-                      {index + 1}
-                    </span>
-                    <span>{stage}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
+          <FloatingProductPreview />
         </div>
       </div>
     </section>
