@@ -82,8 +82,13 @@ where preferences.user_uuid = '{{ var("user_uuid") }}'
       or exists (
           select 1
           from json_each(preferences.locations) as configured_location
-          where lower(jobs.location) like '%' || lower(trim(both '"' from cast(configured_location.value as varchar))) || '%'
-             or lower(jobs.location_normalized) like '%' || lower(trim(both '"' from cast(configured_location.value as varchar))) || '%'
+          where {{ candidate_location_matches(
+              'jobs.location',
+              'jobs.location_normalized',
+              'jobs.location_group',
+              'jobs.work_arrangement',
+              'trim(both \'"\' from cast(configured_location.value as varchar))'
+          ) }}
       )
   )
   and (
