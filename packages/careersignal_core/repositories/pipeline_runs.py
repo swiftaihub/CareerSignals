@@ -23,6 +23,8 @@ error_code, public_error_message, is_current_result, source_connector_run_uuid,
 is_bootstrap_run, trigger_type, bootstrap_uuid, config_bundle_revision_uuid
 """
 
+QUOTA_WINDOW_START_SQL = "date_trunc('day', now() at time zone 'UTC') at time zone 'UTC'"
+
 
 class PipelineRunRepository:
     def __init__(self, store: PostgresStore | None = None) -> None:
@@ -44,11 +46,13 @@ class PipelineRunRepository:
         def _create(active_connection: Any) -> dict[str, Any]:
             if daily_limit is not None:
                 recent = active_connection.execute(
-                    """
+                    f"""
                     select count(*) as count
                     from public.user_pipeline_runs
-                    where user_uuid = %s and submitted_at >= date_trunc('day', now() at time zone 'UTC')
-                      and status <> 'cancelled'
+                    where user_uuid = %s
+                      and submitted_at >= {QUOTA_WINDOW_START_SQL}
+                      and submitted_at < {QUOTA_WINDOW_START_SQL} + interval '1 day'
+                      and status = 'completed'
                     """,
                     [str(user_uuid)],
                 ).fetchone()
@@ -104,6 +108,35 @@ class PipelineRunRepository:
             return _create(connection)
         with self.store.transaction() as transaction:
             return _create(transaction)
+
+    def quota_for_user(
+        self,
+        user_uuid: UUID | str,
+        *,
+        daily_limit: int | None,
+    ) -> dict[str, Any]:
+        row = self.store.fetch_one(
+            f"""
+            select
+                count(*) filter (where status = 'completed')::integer as used,
+                {QUOTA_WINDOW_START_SQL} as window_start,
+                {QUOTA_WINDOW_START_SQL} + interval '1 day' as window_end
+            from public.user_pipeline_runs
+            where user_uuid = %s
+              and submitted_at >= {QUOTA_WINDOW_START_SQL}
+              and submitted_at < {QUOTA_WINDOW_START_SQL} + interval '1 day'
+            """,
+            [str(user_uuid)],
+        ) or {}
+        used = int(row.get("used") or 0)
+        return {
+            "limit": daily_limit,
+            "used": used,
+            "remaining": None if daily_limit is None else max(0, daily_limit - used),
+            "window_start": row.get("window_start"),
+            "window_end": row.get("window_end"),
+            "resets_at": row.get("window_end"),
+        }
 
     def list_for_user(self, user_uuid: UUID | str, *, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
         return self.store.fetch_all(

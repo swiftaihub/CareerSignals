@@ -16,11 +16,13 @@ import { SkillsEditor } from "@/components/settings/skills-editor";
 import { ErrorState } from "@/components/shared/error-state";
 import { LoadingState } from "@/components/shared/loading-state";
 import {
+  ApiClientError,
   cancelPipelineRun,
   createPipelineRun,
   downloadExcelExport,
   getDataFreshness,
   getPipelineRun,
+  getPipelineQuota,
   getPipelineRuns,
   getPreferences,
   getPreferencesOptions,
@@ -37,6 +39,7 @@ import {
 } from "@/lib/preferences";
 import type {
   DataFreshness,
+  PipelineQuota,
   PreferencesDocument,
   PreferenceDynamicOptionKind,
   PreferenceOption,
@@ -59,6 +62,7 @@ export default function SettingsPage() {
   const [options, setOptions] = useState<PreferencesOptions>(EMPTY_PREFERENCES_OPTIONS);
   const [freshness, setFreshness] = useState<DataFreshness | null>(null);
   const [runs, setRuns] = useState<UserPipelineRun[]>([]);
+  const [quota, setQuota] = useState<PipelineQuota | null>(null);
   const [loading, setLoading] = useState(true);
   const [preferenceBusy, setPreferenceBusy] = useState(false);
   const [pipelineBusy, setPipelineBusy] = useState(false);
@@ -67,8 +71,9 @@ export default function SettingsPage() {
   const [pipelineMessage, setPipelineMessage] = useState("");
 
   const refreshRuns = useCallback(async () => {
-    const result = await getPipelineRuns();
+    const [result, nextQuota] = await Promise.all([getPipelineRuns(), getPipelineQuota()]);
     setRuns(normalizeRuns(result));
+    setQuota(nextQuota);
   }, []);
 
   const loadDynamicOptions = useCallback(async (
@@ -80,18 +85,20 @@ export default function SettingsPage() {
   }, []);
 
   useEffect(() => {
-    Promise.allSettled([getPreferences(), getPreferencesOptions(), getDataFreshness(), getPipelineRuns()])
-      .then(([preferencesResult, optionsResult, freshnessResult, runsResult]) => {
+    Promise.allSettled([getPreferences(), getPreferencesOptions(), getDataFreshness(), getPipelineRuns(), getPipelineQuota()])
+      .then(([preferencesResult, optionsResult, freshnessResult, runsResult, quotaResult]) => {
         if (preferencesResult.status === "rejected") throw preferencesResult.reason;
         setPreferences(preferencesResult.value);
         setBaseline(structuredClone(preferencesResult.value));
         if (optionsResult.status === "fulfilled") setOptions(optionsResult.value);
         if (freshnessResult.status === "fulfilled") setFreshness(freshnessResult.value);
         if (runsResult.status === "fulfilled") setRuns(normalizeRuns(runsResult.value));
+        if (quotaResult.status === "fulfilled") setQuota(quotaResult.value);
         const unavailable = [
           optionsResult.status === "rejected" ? "suggestions" : "",
           freshnessResult.status === "rejected" ? "shared-data status" : "",
-          runsResult.status === "rejected" ? "refresh history" : ""
+          runsResult.status === "rejected" ? "refresh history" : "",
+          quotaResult.status === "rejected" ? "refresh allowance" : ""
         ].filter(Boolean);
         if (unavailable.length) {
           setNotice(`Some supporting data is temporarily unavailable: ${unavailable.join(", ")}. You can still review your saved preferences.`);
@@ -160,7 +167,16 @@ export default function SettingsPage() {
         ? "Your first refresh will update shared job data before creating personal matches."
         : "Your match refresh was queued against the latest published shared job data.");
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError : new Error("Match refresh submission failed."));
+      if (requestError instanceof ApiClientError && requestError.errorCode === "PIPELINE_DAILY_LIMIT_REACHED") {
+        setPipelineMessage("Your successful-refresh allowance is used for today. Failed and cancelled attempts do not count.");
+        try {
+          setQuota(await getPipelineQuota());
+        } catch {
+          // Preserve the actionable quota message when the supporting refresh fails.
+        }
+      } else {
+        setError(requestError instanceof Error ? requestError : new Error("Match refresh submission failed."));
+      }
     } finally {
       setPipelineBusy(false);
     }
@@ -289,11 +305,12 @@ export default function SettingsPage() {
         {error ? <div className="mb-5"><ErrorState error={error} title="Settings operation failed" /></div> : null}
         {notice ? <p className={`mb-5 rounded-lg border p-3 text-sm font-medium ${notice.includes("unavailable") ? "border-amber-200 bg-amber-50 text-amber-900" : "border-emerald-200 bg-emerald-50 text-emerald-900"}`} aria-live="polite">{notice}</p> : null}
 
-        <SettingsOverview freshness={freshness} profileCompleteness={preferences.profile_completeness} runs={runs} />
+        <SettingsOverview freshness={freshness} profileCompleteness={preferences.profile_completeness} quota={quota} runs={runs} />
         <SharedDataFreshness freshness={freshness} />
         <PersonalMatchRefresh
           busy={pipelineBusy}
           message={pipelineMessage}
+          quota={quota}
           readOnly={readOnly}
           runs={runs}
           onCancel={cancelRun}

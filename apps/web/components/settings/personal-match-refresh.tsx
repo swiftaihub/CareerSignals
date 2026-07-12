@@ -3,8 +3,8 @@ import { CheckCircle2, Download, ExternalLink, Loader2, Play, XCircle } from "lu
 
 import { SectionCard } from "@/components/shared/section-card";
 import { formatDateTime } from "@/lib/formatters";
-import { latestApplicablePipelineFailure } from "@/lib/preferences";
-import type { UserPipelineRun } from "@/lib/types";
+import { latestApplicablePipelineFailure, pipelineQuotaExhausted } from "@/lib/preferences";
+import type { PipelineQuota, UserPipelineRun } from "@/lib/types";
 
 const ACTIVE_STATES = new Set(["waiting_for_global", "queued", "running"]);
 
@@ -23,6 +23,7 @@ export function PersonalMatchRefresh({
   runs,
   busy,
   readOnly,
+  quota,
   message,
   onStart,
   onCancel,
@@ -31,6 +32,7 @@ export function PersonalMatchRefresh({
   runs: UserPipelineRun[];
   busy: boolean;
   readOnly: boolean;
+  quota: PipelineQuota | null;
   message?: string;
   onStart: () => void;
   onCancel: (run: UserPipelineRun) => void;
@@ -40,6 +42,7 @@ export function PersonalMatchRefresh({
   const lastAttempt = runs[0];
   const lastSuccessful = runs.find((run) => run.status === "completed");
   const lastFailure = latestApplicablePipelineFailure(runs);
+  const quotaExhausted = pipelineQuotaExhausted(quota);
 
   return (
     <SectionCard
@@ -69,14 +72,15 @@ export function PersonalMatchRefresh({
         ) : null}
 
         <div className="mt-5 flex flex-wrap gap-3">
-          <button className="btn btn-primary" disabled={readOnly || busy || Boolean(activeRun)} type="button" onClick={onStart}>
+          <button className="btn btn-primary" disabled={readOnly || busy || Boolean(activeRun) || quotaExhausted} type="button" onClick={onStart}>
             {activeRun || busy ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : <Play className="h-4 w-4" />}
-            {activeRun ? "Refresh in progress" : busy ? "Starting refresh…" : "Refresh My Matches"}
+            {activeRun ? "Refresh in progress" : busy ? "Starting refresh…" : quotaExhausted ? "Daily limit reached" : "Refresh My Matches"}
           </button>
           <Link className="btn" href="/top-matches">Review Results<ExternalLink className="h-4 w-4" /></Link>
           <button className="btn" disabled={readOnly || busy} type="button" onClick={onExport}><Download className="h-4 w-4" />Export Current Results</button>
         </div>
         {readOnly ? <p className="mt-3 text-sm text-amber-800">Demo refresh and export actions are read-only.</p> : null}
+        {quotaExhausted ? <p className="mt-3 text-sm text-amber-800">Your successful-refresh allowance resets {formatDateTime(quota?.resets_at)}. Failed and cancelled attempts do not count.</p> : null}
         {message ? <p className="mt-3 text-sm font-medium text-primary" aria-live="polite">{message}</p> : null}
 
         <div className="mt-6 border-t border-border pt-5">

@@ -7,6 +7,7 @@ import {
   addTagValue,
   createEmptyPreferences,
   latestApplicablePipelineFailure,
+  pipelineQuotaExhausted,
   mergePreferenceOptions,
   normalizeMatchPriorities,
   preferencesAreDirty,
@@ -124,5 +125,17 @@ describe("pipeline status feedback", () => {
 
   it("surfaces the error when the latest attempt actually failed", () => {
     expect(latestApplicablePipelineFailure([failedRun, completedRun])).toBe(failedRun);
+  });
+
+  it("disables refresh only when a configured successful-run quota is exhausted", () => {
+    const window = {
+      used: 2,
+      window_start: "2026-07-12T00:00:00Z",
+      window_end: "2026-07-13T00:00:00Z",
+      resets_at: "2026-07-13T00:00:00Z"
+    };
+    expect(pipelineQuotaExhausted({ ...window, limit: 2, remaining: 0 })).toBe(true);
+    expect(pipelineQuotaExhausted({ ...window, limit: 2, remaining: 1 })).toBe(false);
+    expect(pipelineQuotaExhausted({ ...window, limit: null, remaining: null })).toBe(false);
   });
 });

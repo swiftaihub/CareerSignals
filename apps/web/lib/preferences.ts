@@ -2,6 +2,7 @@ import type {
   EditablePreferences,
   MatchPriorities,
   MatchPriorityKey,
+  PipelineQuota,
   PreferenceOption,
   PreferencesDocument,
   UserPipelineRun
@@ -245,6 +246,10 @@ export function shouldWarnOnNavigation(dirty: boolean, saving: boolean) {
 export function latestApplicablePipelineFailure(runs: UserPipelineRun[]) {
   const latestAttempt = runs[0];
   return latestAttempt?.status === "failed" ? latestAttempt : undefined;
+}
+
+export function pipelineQuotaExhausted(quota: PipelineQuota | null | undefined) {
+  return quota?.limit !== null && quota?.remaining === 0;
 }
 
 export function validatePreferences(value: PreferencesDocument) {

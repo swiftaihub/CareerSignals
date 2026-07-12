@@ -18,6 +18,7 @@ from packages.careersignal_core.repositories.errors import (
 )
 from packages.careersignal_core.repositories.pipeline_runs import (
     PUBLIC_RUN_COLUMNS,
+    QUOTA_WINDOW_START_SQL,
     PipelineRunRepository,
 )
 from packages.careersignal_core.storage.postgres import PostgresStore
@@ -162,11 +163,13 @@ class BootstrapRepository:
 
             if daily_limit is not None:
                 recent = connection.execute(
-                    """
+                    f"""
                     select count(*) as count
                     from public.user_pipeline_runs
-                    where user_uuid = %s and submitted_at >= date_trunc('day', now() at time zone 'UTC')
-                      and status <> 'cancelled'
+                    where user_uuid = %s
+                      and submitted_at >= {QUOTA_WINDOW_START_SQL}
+                      and submitted_at < {QUOTA_WINDOW_START_SQL} + interval '1 day'
+                      and status = 'completed'
                     """,
                     [str(user_uuid)],
                 ).fetchone()

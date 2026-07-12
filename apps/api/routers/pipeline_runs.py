@@ -14,7 +14,7 @@ from apps.api.dependencies.repositories import (
     get_connector_run_repository,
     get_pipeline_run_repository,
 )
-from apps.api.schemas.pipeline import PipelineRunSubmission
+from apps.api.schemas.pipeline import PipelineQuotaResponse, PipelineRunSubmission
 from packages.careersignal_core.repositories.bootstrap import BootstrapRepository
 from packages.careersignal_core.repositories.configs import ConfigRepository
 from packages.careersignal_core.repositories.connector_runs import ConnectorRunRepository
@@ -105,6 +105,18 @@ def list_pipeline_runs(
     repository: PipelineRunRepository = Depends(get_pipeline_run_repository),
 ) -> list[dict[str, Any]]:
     return repository.list_for_user(current_user.user_uuid, limit=limit, offset=offset)
+
+
+@router.get("/quota", response_model=PipelineQuotaResponse)
+def get_pipeline_quota(
+    current_user: CurrentUser = Depends(require_active_user),
+    repository: PipelineRunRepository = Depends(get_pipeline_run_repository),
+    settings: AppSettings = Depends(get_settings),
+) -> dict[str, Any]:
+    return repository.quota_for_user(
+        current_user.user_uuid,
+        daily_limit=settings.user_pipeline_daily_limit,
+    )
 
 
 @router.get("/{run_uuid}")

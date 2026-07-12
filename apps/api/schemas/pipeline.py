@@ -41,3 +41,12 @@ class PipelineRunResponse(APIModel):
     bootstrap_uuid: UUID | None = None
     trigger_type: str | None = None
     events: list[PipelineRunEvent] = []
+
+
+class PipelineQuotaResponse(APIModel):
+    limit: int | None = None
+    used: int = 0
+    remaining: int | None = None
+    window_start: datetime
+    window_end: datetime
+    resets_at: datetime

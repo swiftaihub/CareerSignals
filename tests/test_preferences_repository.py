@@ -6,7 +6,10 @@ from typing import Any, Iterator
 import pytest
 
 from packages.careersignal_core.repositories.configs import _coherent_bundle_uuid
-from packages.careersignal_core.repositories.errors import ConfigBundleConflictError
+from packages.careersignal_core.repositories.errors import (
+    ConfigBundleConflictError,
+    PipelineDailyLimitError,
+)
 from packages.careersignal_core.repositories.preferences import PreferencesRepository
 from packages.careersignal_core.repositories.pipeline_runs import PipelineRunRepository
 from src.config.loader import CONFIG_TYPES, build_config_snapshot
@@ -193,11 +196,16 @@ def test_coherent_bundle_requires_all_three_documents_to_share_identity() -> Non
 
 
 class PipelineConnection:
-    def __init__(self) -> None:
+    def __init__(self, *, completed_count: int = 0) -> None:
         self.insert_params: list[Any] | None = None
+        self.completed_count = completed_count
+        self.quota_statement = ""
 
     def execute(self, statement: str, params: list[Any] | None = None) -> Cursor:
         normalized = " ".join(statement.casefold().split())
+        if "select count(*) as count" in normalized:
+            self.quota_statement = normalized
+            return Cursor(one={"count": self.completed_count})
         if "insert into public.user_pipeline_runs" in normalized:
             self.insert_params = list(params or [])
             return Cursor(
@@ -253,6 +261,56 @@ def test_pipeline_run_persists_bundle_identity_from_immutable_snapshot() -> None
     assert connection.insert_params is not None
     assert connection.insert_params[-1] == OLD_BUNDLE_UUID
     assert created["config_bundle_revision_uuid"] == OLD_BUNDLE_UUID
+
+
+def test_only_completed_pipeline_runs_consume_daily_quota() -> None:
+    snapshot = build_config_snapshot({})
+    allowed = PipelineConnection(completed_count=1)
+
+    PipelineRunRepository(store=PipelineStore(allowed)).create(
+        user_uuid=USER_UUID,
+        snapshot=snapshot,
+        daily_limit=2,
+    )
+
+    assert "status = 'completed'" in allowed.quota_statement
+    assert "status <> 'cancelled'" not in allowed.quota_statement
+
+    exhausted = PipelineConnection(completed_count=2)
+    with pytest.raises(PipelineDailyLimitError):
+        PipelineRunRepository(store=PipelineStore(exhausted)).create(
+            user_uuid=USER_UUID,
+            snapshot=snapshot,
+            daily_limit=2,
+        )
+
+
+class QuotaStore:
+    def fetch_one(self, statement: str, params: list[Any]) -> dict[str, Any]:
+        normalized = " ".join(statement.casefold().split())
+        assert params == [USER_UUID]
+        assert "count(*) filter (where status = 'completed')" in normalized
+        return {
+            "used": 1,
+            "window_start": "2026-07-12T00:00:00Z",
+            "window_end": "2026-07-13T00:00:00Z",
+        }
+
+
+def test_pipeline_quota_reports_successful_usage_and_reset_time() -> None:
+    quota = PipelineRunRepository(store=QuotaStore()).quota_for_user(
+        USER_UUID,
+        daily_limit=2,
+    )
+
+    assert quota == {
+        "limit": 2,
+        "used": 1,
+        "remaining": 1,
+        "window_start": "2026-07-12T00:00:00Z",
+        "window_end": "2026-07-13T00:00:00Z",
+        "resets_at": "2026-07-13T00:00:00Z",
+    }
 
 
 class AliasCursor:

@@ -20,6 +20,7 @@ import type {
   JobFilterOptions,
   JobFilters,
   PaginatedJobs,
+  PipelineQuota,
   PipelineRunList,
   PreferenceDynamicOptionKind,
   PreferenceOption,
@@ -378,6 +379,7 @@ export const restoreConfigVersion = (type: ConfigType, revision: number) =>
 
 export const createPipelineRun = () => apiRequest<UserPipelineRun>("/api/pipeline-runs", { method: "POST" });
 export const getPipelineRuns = () => apiRequest<PipelineRunList | UserPipelineRun[]>("/api/pipeline-runs");
+export const getPipelineQuota = () => apiRequest<PipelineQuota>("/api/pipeline-runs/quota");
 export const getPipelineRun = (runUuid: string) =>
   apiRequest<UserPipelineRun>(`/api/pipeline-runs/${encodeURIComponent(runUuid)}`);
 export const cancelPipelineRun = (runUuid: string) =>

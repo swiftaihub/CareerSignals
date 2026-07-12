@@ -373,9 +373,9 @@ export interface ActionResponse {
 }
 
 export interface PipelineQuota {
-  limit: number;
+  limit: number | null;
   used: number;
-  remaining: number;
+  remaining: number | null;
   window_start: string;
   window_end: string;
   resets_at: string;

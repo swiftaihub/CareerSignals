@@ -1,8 +1,8 @@
-import { CheckCircle2, Clock3, Database, Sparkles, UserRoundCheck } from "lucide-react";
+import { CheckCircle2, Clock3, Database, RefreshCcw, Sparkles, UserRoundCheck } from "lucide-react";
 
 import { SectionCard } from "@/components/shared/section-card";
 import { formatDateTime } from "@/lib/formatters";
-import type { DataFreshness, UserPipelineRun } from "@/lib/types";
+import type { DataFreshness, PipelineQuota, UserPipelineRun } from "@/lib/types";
 
 function OverviewCard({
   icon,
@@ -35,10 +35,12 @@ function OverviewCard({
 export function SettingsOverview({
   freshness,
   runs,
+  quota,
   profileCompleteness
 }: {
   freshness: DataFreshness | null;
   runs: UserPipelineRun[];
+  quota: PipelineQuota | null;
   profileCompleteness: number;
 }) {
   const lastRun = runs[0];
@@ -49,9 +51,9 @@ export function SettingsOverview({
     <SectionCard
       className="scroll-mt-24"
       title="Settings overview"
-      description="A quick read on shared data, your latest matches, and profile readiness."
+      description="A quick read on shared data, your latest matches, refresh allowance, and profile readiness."
     >
-      <div className="grid gap-4 lg:grid-cols-3" id="settings-overview">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4" id="settings-overview">
         <OverviewCard
           eyebrow="Shared job data"
           icon={<Database className="h-5 w-5" />}
@@ -61,6 +63,25 @@ export function SettingsOverview({
           <div className="mt-3 flex items-center gap-2 text-xs font-medium text-muted-foreground">
             <Clock3 className="h-3.5 w-3.5" />
             {freshness?.overall.is_stale ? "Refresh may be delayed" : "Freshness checks are current"}
+          </div>
+        </OverviewCard>
+        <OverviewCard
+          eyebrow="Daily refresh allowance"
+          icon={<RefreshCcw className="h-5 w-5" />}
+          value={quota?.limit === null
+            ? "Unlimited"
+            : quota
+              ? `${quota.remaining ?? 0} of ${quota.limit}`
+              : "Checking"}
+          detail={quota
+            ? quota.limit === null
+              ? `${quota.used} successful refreshes today. Failed and cancelled attempts do not count.`
+              : `${quota.used} successful refreshes used. Failed and cancelled attempts do not count.`
+            : "Loading your personal refresh allowance."}
+        >
+          <div className="mt-3 flex items-center gap-2 text-xs font-medium text-muted-foreground">
+            <Clock3 className="h-3.5 w-3.5" />
+            Resets {formatDateTime(quota?.resets_at)}
           </div>
         </OverviewCard>
         <OverviewCard

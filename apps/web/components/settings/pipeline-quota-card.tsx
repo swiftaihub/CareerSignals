@@ -27,8 +27,9 @@ function resetDate(value?: string) {
 }
 
 export function PipelineQuotaCard({ quota }: { quota?: PipelineQuota | null }) {
+  const unlimited = quota?.limit === null;
   const remaining = quota?.remaining ?? 0;
-  const limit = quota?.limit ?? 2;
+  const limit = quota?.limit ?? 0;
   const used = quota?.used ?? 0;
 
   return (
@@ -39,10 +40,12 @@ export function PipelineQuotaCard({ quota }: { quota?: PipelineQuota | null }) {
             Personal Pipeline Quota
           </div>
           <div className="mt-2 text-2xl font-bold text-foreground">
-            {remaining === 0 ? "0 refreshes available" : refreshLabel(remaining)}
+            {unlimited ? "Unlimited refreshes" : remaining === 0 ? "0 refreshes available" : refreshLabel(remaining)}
           </div>
           <p className="mt-2 text-sm text-muted-foreground">
-            {remaining === 0
+            {unlimited
+              ? `${used} successful refreshes completed in the current window.`
+              : remaining === 0
               ? "No personal refreshes remain in the current quota window."
               : `${used} of ${limit} refreshes used in the current window.`}
           </p>
@@ -60,7 +63,7 @@ export function PipelineQuotaCard({ quota }: { quota?: PipelineQuota | null }) {
         <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
           <div
             className="h-full rounded-full bg-primary transition-all"
-            style={{ width: `${Math.min((used / Math.max(limit, 1)) * 100, 100)}%` }}
+            style={{ width: `${unlimited ? 0 : Math.min((used / Math.max(limit, 1)) * 100, 100)}%` }}
           />
         </div>
       </div>
