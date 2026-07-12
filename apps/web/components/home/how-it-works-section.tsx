@@ -24,7 +24,6 @@ const matchingSignals = [
   { label: "Location & work model", icon: MapPin },
   { label: "Industry & visa signals", icon: Building2 }
 ];
-const constellationStages = ["Profile sun", "Market planet", "Evidence moon", "Application launch"];
 
 export function HowItWorksSection() {
   const stepRefs = useRef<Array<HTMLElement | null>>([]);
@@ -127,37 +126,16 @@ export function HowItWorksSection() {
                 </div>
               </div>
             </div>
-            <div className="story-constellation">
-              <div className="constellation-grid" aria-hidden="true" />
-              <div className="relative z-10 flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-[0.14em] text-cyan-200">Signal constellation</p>
-                  <p className="mt-1 max-w-xs text-sm font-semibold leading-6 text-white">
-                    Every stage brings the right evidence into focus.
-                  </p>
-                </div>
-                <span className="rounded-full border border-white/15 bg-white/10 px-2.5 py-1 text-xs font-bold text-cyan-100">
-                  0{activeStep + 1}
-                </span>
-              </div>
-
-              <div
-                className="constellation-canvas"
-                aria-label={`Active signal stage: ${HOW_IT_WORKS_STEPS[activeStep].title}`}
-              >
-                <div className={cn("constellation-universe", `is-step-${activeStep + 1}`)} aria-hidden="true">
-                  <div className="solar-orbit" />
-                  <div className="celestial-sun" />
-                  <div className="celestial-planet"><span /></div>
-                  <div className="moon-orbit" />
-                  <div className="celestial-moon"><span /></div>
-                  <div className="celestial-rocket"><span /></div>
-                </div>
-                <div className="constellation-caption">
-                  <span>Step {activeStep + 1}</span>
-                  <strong>{constellationStages[activeStep]}</strong>
-                </div>
-              </div>
+            <div className={cn("story-geometry-rain", `is-step-${activeStep + 1}`)} aria-hidden="true">
+              <span className="geometry-drop geometry-drop-square geometry-drop-1" />
+              <span className="geometry-drop geometry-drop-triangle geometry-drop-2" />
+              <span className="geometry-drop geometry-drop-ring geometry-drop-3" />
+              <span className="geometry-drop geometry-drop-diamond geometry-drop-4" />
+              <span className="geometry-drop geometry-drop-square geometry-drop-5" />
+              <span className="geometry-drop geometry-drop-triangle geometry-drop-6" />
+              <span className="geometry-drop geometry-drop-ring geometry-drop-7" />
+              <span className="geometry-drop geometry-drop-diamond geometry-drop-8" />
+              <div className="geometry-landing-lines"><span /><span /><span /></div>
             </div>
           </div>
 
