@@ -1,447 +1,330 @@
-# CareerSignal
+# CareerSignals
 
-CareerSignal is a configurable job-search intelligence pipeline that runs from your local machine and can use MotherDuck as its default analytics store. It collects job postings, normalizes messy source records, extracts structured fields from job descriptions, ranks jobs against a target candidate profile, and exports a polished Excel workbook for search planning.
+CareerSignals is a hosted, multi-user job-search intelligence application. Supabase Auth and PostgreSQL form the SaaS control plane and serving layer, MotherDuck and dbt perform analytics, FastAPI enforces tenant and account policy, and Next.js serves the public, authenticated, Demo, and Admin experiences.
 
-The MVP defaults to MotherDuck mode with mock/sample job data as the source and can ingest real data from Adzuna, SerpApi Google Jobs, Greenhouse, Lever, and USAJOBS when credentials or public board identifiers are configured. Offline local mode remains available by setting `CAREERSIGNAL_DATA_MODE=local`.
-
-## Why This Exists
-
-Targeted job searching produces a lot of noisy, repetitive information. CareerSignal turns postings into a structured tracker with match scores, skill signals, company priorities, and category summaries so a candidate can focus effort on the roles most aligned with their background and goals.
-
-The sample candidate profile emphasizes Python, SQL, Spark/PySpark, dbt, Databricks, cloud data platforms, BI tools, healthcare analytics, fintech/risk analytics, product analytics, and applied LLM analytics.
-
-## Features
-
-- YAML-driven job categories, filters, candidate profile, ranking weights, and skill aliases.
-- Mock connector that runs without paid API keys.
-- Real-source connectors for Adzuna, SerpApi Google Jobs, Greenhouse, Lever, and USAJOBS.
-- Configurable posted-date freshness filter at the API/raw-ingestion boundary; default loads only jobs posted within the last 24 hours.
-- Local debug JSON snapshots when `CAREERSIGNAL_WRITE_DEBUG_JSON=true`.
-- MotherDuck raw/staging/app schemas for production-style ELT mode.
-- dbt staging, intermediate, and mart models for dashboard-ready tables.
-- FastAPI repository layer with local and MotherDuck-backed implementations.
-- Polished FastAPI + Next.js personal dashboard that talks only to FastAPI.
-- Normalized job schema with stable job IDs.
-- Deduplication by job ID, post link, and fuzzy company/title/location matching.
-- Salary parsing for annual and hourly pay ranges.
-- Rule-based skill extraction with alias mapping.
-- Industry, seniority, work-arrangement, and visa-sponsorship classification.
-- Weighted match scoring with deterministic reasoning summaries.
-- Excel workbook export with five tabs, filters, frozen headers, clickable links, salary formatting, and score conditional formatting.
-- Application-status workflow for saved, applied, interview, rejected, offer, and archived roles.
-- Pytest coverage for core processing and export behavior.
-
-## Architecture
+The central safety rule is that shared job acquisition and personal matching are separate stages with separate ownership:
 
 ```text
-config/                 YAML configuration
-data/sample/            Demo job postings
-data/raw/               Local debug raw API/source snapshots
-data/processed/         Local debug processed snapshots and discovery audits
-dbt/                    dbt project for staging, intermediate, and mart models
-packages/               Shared storage, dbt, and repository services
-apps/api/               FastAPI backend
-apps/web/               Next.js dashboard scaffold
-src/config/             Config schemas and loader
-src/connectors/         Job source connectors
-src/ingestion/          Raw and processed data persistence
-src/processing/         Normalization, parsing, extraction, classification, scoring
-src/exporters/          Excel workbook export
-src/utils/              Logging, hashing, text helpers
-tests/                  Unit tests
-outputs/                Generated workbook output
+User-requested personal refresh
+Authenticated active user
+  -> immutable config snapshot
+  -> queued PostgreSQL run
+  -> dedicated worker
+  -> global shared refresh from all active users' job configs
+     -> external Connectors
+     -> shared MotherDuck raw/staging
+     -> dbt selector: shared_refresh
+     -> shared PostgreSQL job_postings
+  -> dbt selector: user_refresh
+  -> atomic user-only publication
 ```
 
-Local processing flow:
+Normal users cannot invoke Connectors directly, choose dbt selectors, submit a tenant UUID, or access another tenant's result partition. A personal refresh first runs the system-owned shared refresh, then filters, categorizes, and scores the shared job universe. The fixed Demo tenant has 20 curated jobs and is read-only.
 
-1. Load and validate YAML configs.
-2. Fetch jobs from one or more configured connectors.
-3. Normalize raw postings into the shared schema.
-4. Keep only API/source records inside the configured freshness window before raw ingestion.
-5. Optionally save timestamped raw JSON for retained source records.
-6. Deduplicate jobs.
-7. Parse salary and extract skills.
-8. Classify industry, seniority, work arrangement, and visa signal.
-9. Score jobs against the candidate profile.
-10. Optionally save timestamped processed JSON.
-11. Export the Excel workbook.
-
-MotherDuck processing flow:
+## Repository map
 
 ```text
-Connector APIs
-  -> raw.job_posts_raw
-  -> staging.python_jobs_processed
-  -> dbt staging models
-  -> dbt intermediate models
-  -> dbt mart models
-  -> FastAPI
-  -> Next.js Dashboard
-  -> Excel Export
+apps/api/                         FastAPI application and authorization boundary
+apps/web/                         Next.js App Router frontend and authenticated BFF
+apps/worker/                      PostgreSQL queue worker for user dbt runs
+apps/scheduler/                   optional cron trigger for shared Connector refresh
+config/                           repository defaults and platform Connector config
+data/demo/demo_jobs.json          fixed 20-job Demo fixture
+dbt/                              shared_refresh and user_refresh models/selectors
+docs/                             deployment, operations, and migration guidance
+packages/careersignal_core/       repositories, tasks, storage, and publication
+scripts/                          bootstrap, seed, migration, and refresh entrypoints
+supabase/migrations/              ordered control-plane and RLS migrations
+supabase/seed/                    deterministic Demo SQL seed
+tests/                            unit, pipeline-isolation, and RLS integration tests
 ```
 
-## Setup
+## Requirements
 
-Python 3.11+ is recommended.
+- Python 3.11 or 3.12
+- Node.js 20 or newer and npm
+- Supabase CLI and either a local Supabase stack or a linked Supabase project
+- A MotherDuck database and token for shared/user dbt execution
+- dbt dependencies installed from `requirements.txt` and `dbt/packages.yml`
 
-For dbt, Python 3.11 or 3.12 is currently the safest choice. Python 3.14 may expose upstream dbt dependency compatibility issues.
+Do not use a plain PostgreSQL database as a drop-in replacement for Supabase migrations: the schema references `auth.users`, `auth.uid()`, and Supabase database roles.
+
+## Environment setup
+
+Copy the examples and fill the local files with development credentials:
+
+```powershell
+Copy-Item .env.example .env
+Copy-Item apps/api/.env.example apps/api/.env
+Copy-Item apps/web/.env.example apps/web/.env.local
+```
+
+The backend environment requires at least:
+
+```dotenv
+CAREERSIGNAL_SAAS_MODE=true
+CAREERSIGNAL_ENVIRONMENT=development
+CAREERSIGNAL_DATA_MODE=postgres
+DATABASE_URL=postgresql://...
+SUPABASE_URL=https://...
+SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+SUPABASE_JWT_AUDIENCE=authenticated
+DEMO_USER_UUID=00000000-0000-4000-8000-000000000020
+DEMO_SESSION_SECRET=<long-random-secret>
+MOTHERDUCK_TOKEN=...
+MOTHERDUCK_DATABASE=CareerSignal
+```
+
+The frontend environment is deliberately small:
+
+```dotenv
+# Server-only; it is never sent to browser JavaScript.
+API_BASE_URL=http://localhost:8000
+
+# Supabase project metadata safe for the browser.
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
+```
+
+Never add `NEXT_PUBLIC_` to `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`, `MOTHERDUCK_TOKEN`, `DEMO_SESSION_SECRET`, Connector credentials, or any other secret. The browser calls the same-origin Next.js BFF, which attaches the verified server-side session when forwarding allowlisted application requests to FastAPI.
+
+## Supabase and migrations
+
+For an explicitly disposable local environment:
+
+```bash
+supabase start
+supabase db reset
+```
+
+For a hosted development/staging project:
+
+```bash
+supabase link --project-ref "$SUPABASE_PROJECT_REF"
+supabase db push --dry-run
+supabase db push
+```
+
+The fourteen files in `supabase/migrations/` must remain in numeric order. Validate them in a disposable project before applying them to a shared environment. Supabase CLI state under `supabase/.temp/` is intentionally ignored; reconstruct a link with `supabase link` rather than committing project metadata.
+
+Bootstrap the first Admin only after migrations have been applied:
+
+```bash
+python scripts/bootstrap_admin.py
+```
+
+`ADMIN_BOOTSTRAP_PASSWORD` is read from the environment and is never printed. The command is idempotent.
+
+Seed the permanent Demo tenant and its exactly 20 current matches:
+
+```bash
+python scripts/seed_demo.py
+```
+
+Set `DEMO_USER_UUID=00000000-0000-4000-8000-000000000020`. Demo login uses a short-lived FastAPI-signed token, not an `auth.users` password. The deterministic SQL equivalent is `supabase/seed/0001_demo.sql`.
+
+See [database migrations and rollback](docs/database/migrations.md) before changing a shared database.
+
+## Install
 
 ```bash
 python -m venv .venv
-.venv\Scripts\activate
+```
+
+Windows PowerShell:
+
+```powershell
+.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 ```
 
-On Windows machines where `python` is not on PATH, use the Python launcher:
+macOS/Linux:
 
 ```bash
-py -m pip install -r requirements.txt
+source .venv/bin/activate
+python -m pip install -r requirements.txt
 ```
 
-Optional environment setup:
-
-```bash
-copy .env.example .env
-```
-
-The default `JOB_SOURCES=mock` uses `data/sample/sample_jobs.json` as the source data. Because the default data mode is MotherDuck, set `MOTHERDUCK_TOKEN` before running the full pipeline, or switch `CAREERSIGNAL_DATA_MODE=local` for offline-only development.
-
-Core data-mode settings:
-
-```text
-CAREERSIGNAL_DATA_MODE=motherduck
-MOTHERDUCK_TOKEN=
-MOTHERDUCK_DATABASE=CareerSignal
-CAREERSIGNAL_LOCAL_DATA_DIR=data
-CAREERSIGNAL_OUTPUT_DIR=outputs
-CAREERSIGNAL_EXCEL_PATH=outputs/job_search_tracker.xlsx
-CAREERSIGNAL_WRITE_DEBUG_JSON=false
-CAREERSIGNAL_EXPORT_EXCEL=false
-CAREERSIGNAL_PROGRESS=true
-CAREERSIGNAL_MOTHERDUCK_BATCH_SIZE=1000
-DBT_PROJECT_DIR=dbt
-DBT_PROFILES_DIR=dbt
-DBT_TARGET=dev
-CAREERSIGNAL_RUN_DBT=true
-CAREERSIGNAL_RUN_DBT_TESTS=true
-```
-
-## Run The Pipeline
-
-```bash
-python src/main.py
-```
-
-or:
-
-```bash
-python -m src.main
-```
-
-Expected terminal summary:
-
-```text
-CareerSignal pipeline completed.
-Fetched jobs: 125
-Freshness filtered out: 32
-Total jobs processed: 15
-Deduplicated jobs: 15
-Top matches: ...
-Excel exported to: outputs/job_search_tracker_20260708_143012.xlsx
-```
-
-If `CAREERSIGNAL_WRITE_DEBUG_JSON=true`, the summary also includes timestamped raw and processed debug snapshot paths.
-
-## Run Tests
-
-```bash
-pytest
-```
-
-## Configuration
-
-Job categories live in `config/jobs_config.yml`. Add, remove, or tune categories without changing processing code:
-
-```yaml
-job_categories:
-  - category_name: "Analytics Engineer"
-    search_titles:
-      - "Analytics Engineer"
-      - "Senior Analytics Engineer"
-    industries:
-      - "technology"
-      - "SaaS"
-```
-
-Candidate preferences and skill groups live in `config/candidate_profile.yml`. Skill aliases live in `config/skill_taxonomy.yml`, which allows terms like `PowerBI`, `Microsoft Power BI`, and `Power BI` to resolve to the same canonical skill.
-
-Ranking weights are configurable:
-
-```yaml
-ranking_weights:
-  title_match: 0.25
-  required_skill_match: 0.25
-  industry_match: 0.20
-  salary_match: 0.10
-  work_arrangement_match: 0.10
-  visa_signal_match: 0.10
-```
-
-Freshness filtering is also configurable in `config/jobs_config.yml`:
-
-```yaml
-freshness_filter:
-  enabled: true
-  max_post_age_hours: 24
-  include_unknown_dates: false
-```
-
-With the default settings, each API refresh loads only jobs posted within the last 24 hours into the raw ingestion boundary. Jobs with unknown or unparseable posted dates are excluded unless `include_unknown_dates` is set to `true`. For sources that expose only a date without a timestamp, CareerSignal treats postings on the cutoff date as eligible. dbt models do not apply this 24-hour cutoff; they transform the rows already present in the raw/staging source tables.
-
-## Real Data Ingestion
-
-Source selection is controlled with `JOB_SOURCES` in `.env`.
-
-```text
-JOB_SOURCES=mock
-```
-
-Use a comma-separated list to combine sources:
-
-```text
-JOB_SOURCES=adzuna,greenhouse,lever
-```
-
-Use `all` to try every real connector:
-
-```text
-JOB_SOURCES=all
-```
-
-If configured real sources return no records, CareerSignal falls back to mock data so local runs still complete.
-
-Supported source settings:
-
-- Adzuna: set `ADZUNA_APP_ID`, `ADZUNA_APP_KEY`, and optional `ADZUNA_COUNTRY`, `ADZUNA_MAX_PAGES`, `ADZUNA_MAX_QUERIES_PER_CATEGORY`.
-- SerpApi Google Jobs: set `SERPAPI_API_KEY`; the default query cap is intentionally low because SerpApi searches may count against paid usage.
-- Greenhouse: set `GREENHOUSE_COMPANY_TOKENS` to board tokens from URLs like `boards.greenhouse.io/{token}`.
-- Lever: set `LEVER_COMPANY_SITES` to site names from URLs like `jobs.lever.co/{site}`.
-- USAJOBS: set `USAJOBS_USER_AGENT` and `USAJOBS_API_KEY` from developer.usajobs.gov.
-
-When `CAREERSIGNAL_WRITE_DEBUG_JSON=true`, local debug snapshots are written to:
-
-- `data/raw/raw_jobs_<timestamp>.json`
-- `data/processed/processed_jobs_<timestamp>.json`
-
-### Discover Greenhouse And Lever Slugs
-
-Greenhouse board tokens and Lever site names are public identifiers, not secret keys. If you know a company's careers URL, the helper below can inspect it, validate any public Greenhouse or Lever endpoints it finds, and generate `.env` lines.
-
-```bash
-py scripts/discover_ats_boards.py --url "Example=https://boards.greenhouse.io/vaulttec"
-```
-
-You can pass several URLs:
-
-```bash
-py scripts/discover_ats_boards.py \
-  --url "Lever Demo=https://jobs.lever.co/leverdemo" \
-  --url "Greenhouse Demo=https://boards.greenhouse.io/vaulttec"
-```
-
-Or use a CSV file with `company,url` columns:
-
-```bash
-py scripts/discover_ats_boards.py --input config/company_targets.csv
-```
-
-The command writes a timestamped JSON audit file to `data/processed/discovery/ats_board_discovery_<timestamp>.json` and prints:
-
-```text
-GREENHOUSE_COMPANY_TOKENS=...
-LEVER_COMPANY_SITES=...
-```
-
-## Excel Workbook
-
-In MotherDuck mode, scheduled/API refreshes do not write local Excel files by default. Set `CAREERSIGNAL_EXPORT_EXCEL=true`, pass `--export-excel` to `scripts\refresh_motherduck.py`, or use the explicit FastAPI Excel export endpoint when you want a workbook.
-
-When enabled, CareerSignal exports a timestamped workbook using `CAREERSIGNAL_EXCEL_PATH` as a base name, for example `outputs/job_search_tracker_20260708_143012.xlsx`. This keeps each run from replacing a previous workbook.
-
-The workbook includes these tabs:
-
-- `All Jobs`: normalized job records and match reasoning.
-- `Top Matches`: jobs at or above `output.top_match_threshold`, sorted by score, salary, and posting date.
-- `By Category Summary`: volume, match quality, salary, work arrangement, and visa signal by category.
-- `Skill Gap Analysis`: skill frequency across jobs, candidate coverage, gap priority, and example titles.
-- `Company Priority List`: company-level match quality, salary, visa summary, and priority.
-
-In local mode, Excel is exported from Python processed data. In MotherDuck mode, Excel is exported from dbt mart tables so the dashboard and workbook share the same source of truth.
-
-## FastAPI + Next.js Personal Dashboard
-
-CareerSignal now includes a polished personal dashboard for job-search intelligence. The frontend is a Next.js App Router application with TypeScript, Tailwind CSS, shadcn-style reusable components, TanStack Table, Recharts, and Lucide icons. It never reads local files or calls MotherDuck directly; every page uses the FastAPI service layer.
-
-Run the backend:
-
-```bash
-uvicorn apps.api.main:app --reload
-```
-
-Run the frontend:
+Frontend dependencies:
 
 ```bash
 cd apps/web
 npm install
-npm run dev
+cd ../..
 ```
 
-Set the frontend API base URL in `apps/web/.env.local` or use the example file:
-
-```text
-NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
-```
-
-FastAPI allows local browser access from `http://localhost:3000` by default through `CORS_ORIGINS`. MotherDuck credentials stay in backend environment variables such as `MOTHERDUCK_TOKEN`; do not expose them with a `NEXT_PUBLIC_` prefix.
-
-Dashboard routes:
-
-- `/`: product home page explaining the problem, solution, value, stack, architecture, use cases, and SaaS evolution path.
-- `/dashboard`: metrics, category chart, visa distribution, work-arrangement distribution, match-tier distribution, and latest top matches from `/api/dashboard/summary`.
-- `/jobs`: searchable and filterable Job Explorer with pagination, sorting, status updates, JD/apply links, and a detail drawer.
-- `/top-matches`: focused daily review queue for high-scoring roles from `/api/top-matches`.
-- `/skill-gap`: skill frequency, candidate coverage, and gap priority table from `/api/skill-gap`.
-- `/companies`: company-priority analysis from `/api/company-priority`.
-- `/settings`: operational controls for pipeline runs, dbt runs/tests, Excel export, download, and data-status metadata.
-
-Primary API endpoints:
-
-- `GET /api/health` and `GET /health`
-- `GET /api/jobs` with `limit`, `offset`, `page`, `page_size`, `category_name`, `min_match_score`, `max_match_score`, `company`, `industry`, `location`, `work_arrangement`, `visa_signal`, `application_status`, `search`, `sort_by`, and `sort_order`
-- `GET /api/jobs/{job_id}`
-- `PATCH /api/jobs/{job_id}/status`
-- `GET /api/dashboard/summary`
-- `GET /api/top-matches`
-- `GET /api/category-summary`
-- `GET /api/skill-gap`
-- `GET /api/company-priority`
-- `GET /api/data/status`
-- `POST /api/pipeline/run`
-- `POST /api/dbt/run`
-- `POST /api/dbt/test`
-- `POST /api/excel/export`
-- `GET /api/excel/download`
-
-FastAPI chooses the repository implementation from `CAREERSIGNAL_DATA_MODE`. In `motherduck` mode, it queries dbt mart tables through `MotherDuckJobRepository`. In `local` mode, it reads the latest generated Excel workbook through `LocalJobRepository`. Both modes return the same API-facing field names, so the frontend stays typed and data-mode agnostic.
-
-Application status updates use `user_id=personal_user` until authentication is added. In MotherDuck mode, statuses are persisted to `app.job_application_status`. In local mode, statuses are persisted to a small sidecar file under `outputs/` so the offline dashboard remains usable.
-
-The Settings page calls backend actions only. `Run Pipeline` executes the configured connector-to-processing flow, dbt buttons run the dbt project against the configured profiles directory, and Excel export writes a timestamped workbook from local processed data or MotherDuck/dbt mart tables depending on the active mode.
-
-Future SaaS evolution can add Supabase Auth, per-user candidate profiles, hosted refresh jobs, and multi-user workspaces without changing the rule that the browser talks only to FastAPI.
-
-## MotherDuck + dbt Analytics Layer
-
-MotherDuck mode makes Excel an export target instead of the primary source of truth. Raw JSON files are useful for debugging and offline development, but production-mode data should live in MotherDuck tables with dbt providing lineage, repeatable transformations, and dashboard-ready marts.
-
-Set:
-
-```text
-CAREERSIGNAL_DATA_MODE=motherduck
-MOTHERDUCK_DATABASE=CareerSignal
-MOTHERDUCK_TOKEN=<stored only in .env>
-DBT_TARGET=dev
-```
-
-Do not expose `MOTHERDUCK_TOKEN` in frontend code, README files, logs, tests, or committed examples.
-
-Initialize schemas:
-
-```bash
-python -m packages.careersignal_core.storage.init_motherduck
-```
-
-Run the pipeline in MotherDuck mode:
-
-```bash
-CAREERSIGNAL_DATA_MODE=motherduck python src/main.py
-```
-
-Run the full API-to-dbt refresh path. This loads `.env`, calls the configured job APIs, writes raw and processed bridge rows to MotherDuck, runs dbt with `--full-refresh`, and tests dbt without writing local output files:
-
-```bash
-python scripts\refresh_motherduck.py
-```
-
-Use incremental dbt refresh instead of full refresh:
-
-```bash
-python scripts\refresh_motherduck.py --incremental
-```
-
-Export Excel as an explicit local artifact:
-
-```bash
-python scripts\refresh_motherduck.py --export-excel
-```
-
-Run dbt manually against existing MotherDuck source tables:
+dbt packages and compile:
 
 ```bash
 cd dbt
-dbt debug --profiles-dir .
-dbt run --profiles-dir . --full-refresh
-dbt test --profiles-dir .
+dbt deps
+dbt compile --profiles-dir .
+cd ..
 ```
 
-Manual dbt commands do not call APIs and do not parse `raw.job_posts_raw` into scored jobs. They rebuild dbt models from the existing bridge source `staging.python_jobs_processed`. Use `scripts\refresh_motherduck.py` when you want API ingestion and dbt refresh in one command.
+## Run locally
 
-Before dbt starts, CareerSignal shows progress for connector fetches, normalization, freshness filtering, raw MotherDuck writes, deduplication, scoring, and processed bridge writes. The raw-write step can be slow on large runs because Python serializes and hashes each raw JSON payload, then sends batches to remote MotherDuck where `raw_payload` is cast to JSON. Tune `CAREERSIGNAL_MOTHERDUCK_BATCH_SIZE` if needed; `1000` is a conservative default.
-
-The dbt project is named `careersignal_dbt` and includes:
-
-- `raw` sources: `job_posts_raw`, `ingestion_runs`, `connector_errors`
-- `staging` sources: `python_jobs_processed`, `python_candidate_skills`
-- `app` source: `job_application_status`
-- staging models that standardize Python bridge output
-- intermediate models for dedupe, skill explosion, and latest application status
-- mart models for jobs, top matches, category summary, skill gap analysis, and company priorities
-
-Each SQL model includes an explicit `config(...)` block and materializes as an incremental MotherDuck/DuckDB table using `incremental_strategy='delete+insert'`, a stable `unique_key`, and `on_schema_change='sync_all_columns'`. Append-oriented staging models preserve new bridge observations; current-state intermediate and mart models clear their target table during incremental runs before inserting the latest result set, which prevents stale dashboard rows while keeping dbt in incremental materialization mode.
-
-When `CAREERSIGNAL_DATA_MODE=motherduck`, the Python dbt runner uses the `dev` dbt target so model refreshes load into the MotherDuck database named by `MOTHERDUCK_DATABASE`, defaulting to `CareerSignal`.
-
-The FastAPI backend queries mart tables through `MotherDuckJobRepository` when `CAREERSIGNAL_DATA_MODE=motherduck`. In local mode it uses `LocalJobRepository` and reads local workbook output as a fallback.
-
-FastAPI:
+Use four processes from the repository root:
 
 ```bash
-uvicorn apps.api.main:app --reload
+uvicorn apps.api.main:app --reload --host 0.0.0.0 --port 8000
+python -m apps.worker.main
+python -m apps.scheduler.main
+cd apps/web && npm run dev
 ```
 
-Next.js dashboard:
+The web application is available at `http://localhost:3000`; the API health endpoint is `http://localhost:8000/api/health`.
+
+Alternatively, after preparing `.env` and `apps/web/.env.local`:
+
+```bash
+docker compose up
+```
+
+The Compose stack runs API, worker, scheduler, and web processes. It does not run a fake local MotherDuck server; configure the real MotherDuck service. Supabase remains a local CLI stack or hosted project outside this Compose file.
+
+## Application routes
+
+Public routes:
+
+- `/` — Home, login/register calls to action, and one-click Demo entry
+- `/pricing` — current manual-entitlement pricing placeholder
+- `/login` and `/register` — server-action authentication flows
+- `/pending` and `/account-expired` — restricted account-state experiences
+
+Authenticated routes:
+
+- `/dashboard`, `/jobs`, `/top-matches`, `/skill-gap`, `/companies`
+- `/settings` — account metadata, sanitized source freshness, structured config overrides, revision history, personal run queue/history, and user-scoped export
+- `/admin`, `/admin/users`, `/admin/audit` — server-gated Admin experiences
+
+The protected and Admin layouts load `/api/me` server-side. Pending, expired, suspended, and deleted accounts do not render analytical pages. Hiding Admin navigation is only a convenience; FastAPI independently enforces `require_admin` on every Admin API.
+
+Demo instructions are `Username: demo`, `Password: not required`. Demo sessions may read the fixed partition but cannot change statuses/configuration, run a Pipeline, or export the full dataset.
+
+## API surface
+
+Authentication and account:
+
+- `POST /api/auth/login`
+- `POST /api/auth/register`
+- `POST /api/auth/demo-session`
+- `GET /api/me`
+
+User-scoped application data:
+
+- `GET /api/jobs`, `/api/jobs/filter-options`, `/api/jobs/facets`, `/api/jobs/{job_id}`
+- `PATCH /api/jobs/{job_id}/status`
+- `GET /api/dashboard/summary`, `/api/top-matches`, `/api/category-summary`
+- `GET /api/skill-gap`, `/api/company-priority`
+- `POST /api/exports/excel`
+
+Configuration and processing:
+
+- `GET /api/configs`, `GET|PUT /api/configs/{config_type}`
+- config reset, reset-field, versions, and restore endpoints
+- `GET|POST /api/pipeline-runs` plus owned run detail/cancel
+- `GET /api/data-freshness` (sanitized and read-only)
+
+Admin:
+
+- `GET /api/admin/metrics`
+- paginated `/api/admin/users` lifecycle endpoints
+- `GET /api/admin/audit-logs`
+- `POST /api/admin/connector-runs` to enqueue an Admin-only global refresh
+
+The former user-facing `/api/pipeline/run`, `/api/dbt/run`, and `/api/dbt/test` operations are deprecated and return `410 Gone`. There is no public Connector refresh endpoint.
+
+## Configuration semantics
+
+`config/candidate_profile.yml`, `config/jobs_config.yml`, and `config/skill_taxonomy.yml` are version-controlled defaults. Each user stores only validated JSON overrides in PostgreSQL:
+
+```text
+repository default + user override = effective user configuration
+```
+
+Each successful save creates an immutable revision. Restoring an older revision creates another revision; history is not rewritten. `config/platform_connector_config.yml` remains system-owned for Connector sources, budgets, retry, freshness, and optional cron settings. Shared acquisition search categories and broad location filters are built from every active non-Demo user's effective `jobs_config`.
+
+Changing Job Preferences does not query external job APIs in the request/response path. Updated acquisition fields are included in the next scheduled, Admin-triggered, or first-user bootstrap global refresh. The personal worker snapshots the effective configuration and then runs only the fixed `user_refresh` dbt selector for that user/run partition against a successful shared-data version.
+
+## Pipeline operations
+
+The global pipeline is system-owned. It aggregates every eligible active production user's effective `jobs_config`, normalizes and deduplicates connector requests, runs external connectors, refreshes shared dbt models with `shared_refresh`, and publishes shared job data only after the full shared build succeeds. It is scheduled by the runtime environment:
+
+```env
+CONNECTOR_REFRESH_CRON=0 7,16,21 * * *
+CONNECTOR_REFRESH_TIMEZONE=America/New_York
+CONNECTOR_REFRESH_TRIGGER_MODE=scheduled
+```
+
+The scheduler enqueues metadata only; the worker claims global runs and uses the same lock/publication path for scheduled, Admin, CLI, and first-user bootstrap refreshes. Normal users do not receive a global refresh endpoint.
+
+The personal pipeline is user-owned. It never imports connector clients, never runs `shared_refresh`, never accepts a browser-supplied `user_uuid`, and never accepts a browser-supplied dbt selector. After a user's bootstrap is complete, `POST /api/pipeline-runs` snapshots that authenticated user's config, binds the run to the latest successfully published shared connector run, and queues only `user_refresh`.
+
+First-user bootstrap is server-orchestrated. The first personal request creates a durable bootstrap workflow, snapshots the user's current config, queues a `first_user_bootstrap` global refresh that includes that frozen acquisition config, waits for successful shared publication, binds the waiting personal run to that exact `connector_run_uuid`, and then runs the personal dbt-only refresh. Duplicate first clicks return the existing workflow instead of creating another global run.
+
+Enqueue a trusted production-equivalent shared refresh manually. This creates a `manual_cli` run and requires the worker to be running; the worker performs connector acquisition, MotherDuck/dbt work, and PostgreSQL publication:
+
+```bash
+python scripts/refresh_connectors.py
+# Equivalent explicit form:
+python scripts/refresh_connectors.py --enqueue
+python -m apps.worker.main
+```
+
+Run the fixed shared dbt selector directly against already staged shared data:
+
+```bash
+cd dbt
+dbt build --selector shared_refresh --profiles-dir .
+```
+
+Development-only user selector example (use real UUID values and an existing staged snapshot):
+
+```bash
+dbt build --selector user_refresh --profiles-dir . \
+  --vars '{"user_uuid":"00000000-0000-4000-8000-000000000001","run_uuid":"00000000-0000-4000-8000-000000000002","connector_run_uuid":"00000000-0000-4000-8000-000000000003"}'
+```
+
+Never pass an arbitrary selector from a request, run a user refresh with `--full-refresh`, or delete an unqualified multi-user table. A failed user build/publication leaves the previous current result partition unchanged.
+
+## Verification
+
+Backend and database tests:
+
+```bash
+python -m pip install -r requirements.txt
+pytest
+```
+
+Frontend:
 
 ```bash
 cd apps/web
 npm install
-npm run dev
+npm run test
+npm run lint
+npm run build
 ```
 
-The Next.js frontend never receives MotherDuck credentials. It calls FastAPI endpoints such as `/api/jobs`, `/api/top-matches`, `/api/data/status`, `/api/dbt/run`, and `/api/dbt/test`.
+dbt:
 
-## Connector Design
+```bash
+cd dbt
+dbt deps
+dbt compile --profiles-dir .
+dbt build --selector shared_refresh --profiles-dir .
+dbt build --selector user_refresh --profiles-dir . \
+  --vars '{"user_uuid":"TEST_UUID","run_uuid":"TEST_RUN_UUID"}'
+```
 
-Each connector implements `BaseJobConnector.fetch_jobs(category_config)` and returns raw job dictionaries that can be normalized by `src/processing/normalize.py`. API connectors are intentionally environment-driven so credentials are not hardcoded. Source adapters catch recoverable HTTP and JSON failures, log them, and allow the rest of the pipeline to continue.
+RLS and two-user tests require real Supabase test credentials from the non-committed `.env`. Skipped integration tests are not equivalent to a pass; inspect the Pytest skip report.
 
-## Future Roadmap
+## Production
 
-- Phase 1: CLI pipeline + Excel export.
-- Phase 2: MotherDuck + dbt analytics layer.
-- Phase 3: FastAPI + Next.js personal dashboard.
-- Phase 4: application status workflow.
-- Phase 5: Supabase Auth + user profiles.
-- Phase 6: hosted multi-user SaaS.
+Deploy API, worker, scheduler, and web as separate processes. Run exactly one logical scheduler, keep `USER_PIPELINE_MAX_CONCURRENCY=1` until MotherDuck writer concurrency has been validated, terminate TLS before Next.js, set exact production CORS origins, and store all secrets in the hosting platform's secret manager.
 
-## Notes
+Back up PostgreSQL before migrations, monitor queue age and refresh freshness, and test Demo/user/Admin authorization after every release. Full deployment, health, backup, restore, and rollback procedures are in [production deployment and operations](docs/deployment.md).
 
-This MVP intentionally avoids fragile web scraping as the default path and does not require paid APIs. It is suitable for local experimentation, portfolio demonstration, and iterative extension into a richer job-search operating system.
+Billing is currently a manual entitlement placeholder. `estimated_mrr_cents` is a projection for active non-Demo users; only successful billing events count as actual revenue. A future Stripe integration should use verified, idempotent webhooks to append billing and entitlement events rather than mutating remaining-day counters.

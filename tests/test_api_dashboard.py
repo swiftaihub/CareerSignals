@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from fastapi.testclient import TestClient
 import pandas as pd
 import pytest
 
+from apps.api.dependencies.authorization import require_non_demo_user
+from apps.api.dependencies.models import CurrentUser
 from apps.api.main import app, get_repository
 from packages.careersignal_core.repositories.jobs import (
     JobFilters,
@@ -63,6 +66,20 @@ JOBS = [
         "date_posted": "2026-06-30",
     },
 ]
+
+
+def fake_current_user() -> CurrentUser:
+    return CurrentUser(
+        user_uuid=UUID("11111111-1111-4111-8111-111111111111"),
+        username="test-user",
+        role="user",
+        account_status="active",
+        created_at=datetime(2026, 7, 1),
+        activated_at=datetime(2026, 7, 1),
+        expires_at=datetime(2026, 8, 1, tzinfo=ZoneInfo("UTC")),
+        remaining_days=21,
+        last_successful_pipeline_run_uuid=None,
+    )
 
 
 class FakeRepository(JobRepository):
@@ -255,6 +272,7 @@ def test_jobs_endpoint_supports_location_group_and_free_text_filters() -> None:
 
 def test_job_detail_and_status_update() -> None:
     app.dependency_overrides[get_repository] = lambda: FakeRepository()
+    app.dependency_overrides[require_non_demo_user] = fake_current_user
     client = TestClient(app)
 
     detail = client.get("/api/jobs/job-1")

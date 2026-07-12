@@ -95,6 +95,56 @@ TABLE_SQL = [
     )
     """,
     """
+    create table if not exists staging.shared_jobs_processed (
+        job_id varchar,
+        connector_run_uuid varchar,
+        source varchar,
+        source_job_id varchar,
+        category_name varchar,
+        job_title varchar,
+        normalized_title varchar,
+        company varchar,
+        normalized_company varchar,
+        industry varchar,
+        location varchar,
+        location_normalized varchar,
+        location_group varchar,
+        work_arrangement varchar,
+        employment_type varchar,
+        seniority varchar,
+        salary_min double,
+        salary_max double,
+        salary_midpoint double,
+        salary_range_text varchar,
+        date_posted varchar,
+        posted_at timestamp,
+        date_collected varchar,
+        jd_post_link varchar,
+        apply_link varchar,
+        job_description varchar,
+        normalized_description varchar,
+        visa_signal varchar,
+        visa_status varchar,
+        visa_evidence varchar,
+        visa_confidence varchar,
+        first_seen_at timestamp,
+        last_seen_at timestamp,
+        inserted_at timestamp,
+        primary key (job_id, connector_run_uuid)
+    )
+    """,
+    """
+    create table if not exists staging.shared_job_observations (
+        observation_id varchar primary key,
+        connector_run_uuid varchar,
+        job_id varchar,
+        source varchar,
+        source_job_id varchar,
+        observed_at timestamp,
+        source_url varchar
+    )
+    """,
+    """
     create table if not exists staging.python_candidate_skills (
         skill varchar primary key,
         skill_group varchar,
@@ -104,11 +154,77 @@ TABLE_SQL = [
     """
     create table if not exists app.job_application_status (
         user_id varchar,
+        user_uuid varchar,
         job_id varchar,
         application_status varchar,
         notes varchar,
         updated_at timestamp,
         primary key (user_id, job_id)
+    )
+    """,
+    """
+    create table if not exists app.user_config_snapshots (
+        user_uuid varchar,
+        run_uuid varchar,
+        config_hash varchar,
+        snapshot_version integer,
+        config_revision_map json,
+        config_snapshot json,
+        staged_at timestamp,
+        primary key (user_uuid, run_uuid)
+    )
+    """,
+    """
+    create table if not exists app.user_candidate_skills (
+        user_uuid varchar,
+        run_uuid varchar,
+        config_hash varchar,
+        skill varchar,
+        skill_group varchar,
+        in_candidate_profile boolean,
+        staged_at timestamp,
+        primary key (user_uuid, run_uuid, skill)
+    )
+    """,
+    """
+    create table if not exists app.user_job_preferences (
+        user_uuid varchar,
+        run_uuid varchar,
+        config_hash varchar,
+        category_name varchar,
+        search_titles json,
+        industries json,
+        seniority json,
+        target_titles json,
+        target_industries json,
+        locations json,
+        work_arrangements json,
+        employment_types json,
+        visa_preferences json,
+        excluded_companies json,
+        excluded_titles json,
+        min_base_salary double,
+        preferred_base_salary double,
+        title_match_weight double,
+        required_skill_match_weight double,
+        industry_match_weight double,
+        salary_match_weight double,
+        work_arrangement_match_weight double,
+        visa_signal_match_weight double,
+        top_match_threshold double,
+        staged_at timestamp,
+        primary key (user_uuid, run_uuid, category_name)
+    )
+    """,
+    """
+    create table if not exists app.user_skill_aliases (
+        user_uuid varchar,
+        run_uuid varchar,
+        config_hash varchar,
+        canonical_skill varchar,
+        alias varchar,
+        staged_at timestamp,
+        primary key (user_uuid, run_uuid, canonical_skill, alias)
     )
     """,
 ]
@@ -119,6 +235,8 @@ MIGRATION_SQL = [
     "alter table staging.python_jobs_processed add column if not exists visa_status varchar",
     "alter table staging.python_jobs_processed add column if not exists visa_evidence varchar",
     "alter table staging.python_jobs_processed add column if not exists visa_confidence varchar",
+    "alter table app.job_application_status add column if not exists user_uuid varchar",
+    "alter table if exists intermediate.int_user_jobs_scored add column if not exists missing_candidate_skills varchar",
 ]
 
 

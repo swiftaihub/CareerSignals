@@ -1,0 +1,81 @@
+enabled_sources:
+  - mock
+
+global_filters:
+  country: "US"
+  locations:
+    - "Remote"
+    - "New York, NY"
+    - "Wilmington, DE"
+    - "Philadelphia, PA"
+  work_type:
+    - "remote"
+    - "hybrid"
+  employment_type:
+    - "full-time"
+
+freshness_filter:
+  enabled: true
+  max_post_age_hours: 24
+  include_unknown_dates: false
+
+# Repository-controlled broad acquisition queries. User overrides never alter
+# this list and therefore never trigger or broaden an external API request.
+acquisition_categories:
+  - category_name: "Data Scientist - Tech"
+    search_titles: ["Data Scientist", "Product Data Scientist", "Machine Learning Data Scientist"]
+    industries: ["technology", "software", "AI", "SaaS"]
+    seniority: ["Mid-level", "Senior"]
+  - category_name: "Data Scientist - Healthcare"
+    search_titles: ["Healthcare Data Scientist", "Clinical Data Scientist", "Health Analytics Data Scientist", "Product Data Scientist Healthcare"]
+    industries: ["healthcare", "health tech", "digital health", "patient engagement"]
+    seniority: ["Mid-level", "Senior"]
+  - category_name: "BI Analyst - Banking"
+    search_titles: ["Senior BI Analyst", "Business Intelligence Analyst", "Risk Information Analyst", "Analytics Reporting Analyst"]
+    industries: ["banking", "financial services", "credit card", "consumer banking"]
+    seniority: ["Mid-level", "Senior"]
+  - category_name: "Risk Analyst - Fintech"
+    search_titles: ["Risk Analyst", "Credit Risk Analyst", "Fraud Strategy Analyst", "Risk Analytics Analyst"]
+    industries: ["fintech", "consumer lending", "credit risk", "fraud"]
+    seniority: ["Mid-level", "Senior"]
+  - category_name: "BI / Risk Analyst - Banking & Fintech"
+    search_titles: ["Senior BI Analyst", "Risk Analyst", "Credit Risk Analyst", "Fraud Strategy Analyst", "Business Intelligence Analyst", "Risk Information Analyst"]
+    industries: ["banking", "fintech", "consumer lending", "credit risk", "fraud"]
+    seniority: ["Mid-level", "Senior"]
+  - category_name: "Analytics Engineer"
+    search_titles: ["Analytics Engineer", "Senior Analytics Engineer", "Data Analytics Engineer", "BI Engineer"]
+    industries: ["technology", "SaaS", "data platform", "cloud"]
+    seniority: ["Mid-level", "Senior"]
+  - category_name: "Product Data Scientist"
+    search_titles: ["Product Data Scientist", "Product Analytics Data Scientist", "Experimentation Data Scientist"]
+    industries: ["technology", "software", "SaaS", "AI"]
+    seniority: ["Mid-level", "Senior"]
+  - category_name: "Healthcare Analytics Engineer"
+    search_titles: ["Healthcare Analytics Engineer", "Clinical Analytics Engineer", "Health Data Engineer"]
+    industries: ["healthcare", "health tech", "digital health", "provider analytics"]
+    seniority: ["Mid-level", "Senior"]
+  - category_name: "Fraud Strategy Analyst"
+    search_titles: ["Fraud Strategy Analyst", "Fraud Analytics Analyst", "Fraud Risk Analyst"]
+    industries: ["fintech", "banking", "payments", "fraud"]
+    seniority: ["Mid-level", "Senior"]
+  - category_name: "Credit Risk Analyst"
+    search_titles: ["Credit Risk Analyst", "Credit Strategy Analyst", "Consumer Lending Risk Analyst"]
+    industries: ["banking", "fintech", "consumer lending", "credit risk"]
+    seniority: ["Mid-level", "Senior"]
+
+source_budgets:
+  adzuna: {page_limit: 1, query_limit_per_category: 4}
+  serpapi: {page_limit: 1, query_limit_per_category: 1}
+  greenhouse: {page_limit: 1, query_limit_per_category: 4}
+  lever: {page_limit: 1, query_limit_per_category: 4}
+  usajobs: {page_limit: 1, query_limit_per_category: 2}
+
+retry:
+  timeout_seconds: 15
+  max_attempts: 3
+  backoff_seconds: 1
+
+schedule:
+  cron: "0 7,16,21 * * *"
+  timezone: "America/New_York"
+  stale_after_hours: 8

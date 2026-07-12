@@ -28,6 +28,11 @@ export function ErrorState({
           {apiError.status ? ` - HTTP ${apiError.status}` : ""}
         </p>
       ) : null}
+      {apiError?.resets_at ? (
+        <p className="mt-2 text-xs text-red-800">
+          Available again {new Date(apiError.resets_at).toLocaleString()}.
+        </p>
+      ) : null}
     </div>
   );
 }

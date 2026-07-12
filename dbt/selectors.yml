@@ -1,0 +1,14 @@
+selectors:
+  - name: shared_refresh
+    description: Build only candidate-independent platform resources.
+    definition:
+      method: tag
+      value: shared
+      indirect_selection: cautious
+
+  - name: user_refresh
+    description: Build only one user/run partition supplied through trusted vars.
+    definition:
+      method: tag
+      value: user
+      indirect_selection: eager

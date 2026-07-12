@@ -1,40 +1,95 @@
-"""Typed configuration and job schemas for CareerSignal."""
+"""Typed platform, user, and normalized-job schemas for CareerSignals."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-class GlobalFilters(BaseModel):
+class StrictConfigModel(BaseModel):
+    """Configuration base class that rejects undocumented input fields."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class GlobalFilters(StrictConfigModel):
+    """Platform-owned filters used only while acquiring the shared job universe."""
+
     country: str = "US"
     locations: list[str] = Field(default_factory=list)
     work_type: list[str] = Field(default_factory=list)
     employment_type: list[str] = Field(default_factory=list)
 
 
-class FreshnessFilter(BaseModel):
+class FreshnessFilter(StrictConfigModel):
     enabled: bool = True
-    max_post_age_hours: int = Field(default=24, gt=0)
+    max_post_age_hours: int = Field(default=24, gt=0, le=24 * 90)
     include_unknown_dates: bool = False
 
 
-class JobCategoryConfig(BaseModel):
-    category_name: str
-    search_titles: list[str] = Field(default_factory=list)
-    industries: list[str] = Field(default_factory=list)
-    seniority: list[str] = Field(default_factory=list)
+class JobCategoryConfig(StrictConfigModel):
+    category_name: str = Field(min_length=1, max_length=160)
+    search_titles: list[str] = Field(default_factory=list, max_length=100)
+    industries: list[str] = Field(default_factory=list, max_length=100)
+    seniority: list[str] = Field(default_factory=list, max_length=30)
 
 
-class RankingWeights(BaseModel):
-    title_match: float = 0.25
-    required_skill_match: float = 0.25
-    industry_match: float = 0.20
-    salary_match: float = 0.10
-    work_arrangement_match: float = 0.10
-    visa_signal_match: float = 0.10
+class ConnectorRetryConfig(StrictConfigModel):
+    timeout_seconds: float = Field(default=15, gt=0, le=120)
+    max_attempts: int = Field(default=3, ge=1, le=10)
+    backoff_seconds: float = Field(default=1, ge=0, le=60)
+
+
+class ConnectorBudgetConfig(StrictConfigModel):
+    page_limit: int = Field(default=1, ge=1, le=100)
+    query_limit_per_category: int = Field(default=4, ge=1, le=100)
+
+
+class ConnectorScheduleConfig(StrictConfigModel):
+    cron: str = "0 7,16,21 * * *"
+    timezone: str = "America/New_York"
+    stale_after_hours: int = Field(default=8, ge=1, le=24 * 30)
+
+
+class PlatformConnectorConfig(StrictConfigModel):
+    """System-only Connector acquisition configuration.
+
+    This model is deliberately separate from every user-editable model.  It is
+    loaded only from the repository-controlled platform YAML file.
+    """
+
+    enabled_sources: list[
+        Literal["mock", "adzuna", "serpapi", "greenhouse", "lever", "usajobs"]
+    ] = Field(default_factory=lambda: ["mock"])
+    global_filters: GlobalFilters = Field(default_factory=GlobalFilters)
+    freshness_filter: FreshnessFilter = Field(default_factory=FreshnessFilter)
+    acquisition_categories: list[JobCategoryConfig] = Field(default_factory=list)
+    source_budgets: dict[str, ConnectorBudgetConfig] = Field(default_factory=dict)
+    retry: ConnectorRetryConfig = Field(default_factory=ConnectorRetryConfig)
+    schedule: ConnectorScheduleConfig = Field(default_factory=ConnectorScheduleConfig)
+
+
+class UserJobFilters(StrictConfigModel):
+    """Preferences applied to the existing shared job universe."""
+
+    country: str = "US"
+    locations: list[str] = Field(default_factory=list, max_length=100)
+    work_type: list[str] = Field(default_factory=list, max_length=20)
+    employment_type: list[str] = Field(default_factory=list, max_length=20)
+    visa_preferences: list[str] = Field(default_factory=list, max_length=20)
+    excluded_companies: list[str] = Field(default_factory=list, max_length=200)
+    excluded_titles: list[str] = Field(default_factory=list, max_length=200)
+
+
+class RankingWeights(StrictConfigModel):
+    title_match: float = Field(default=0.25, ge=0, le=1)
+    required_skill_match: float = Field(default=0.25, ge=0, le=1)
+    industry_match: float = Field(default=0.20, ge=0, le=1)
+    salary_match: float = Field(default=0.10, ge=0, le=1)
+    work_arrangement_match: float = Field(default=0.10, ge=0, le=1)
+    visa_signal_match: float = Field(default=0.10, ge=0, le=1)
 
     @property
     def total(self) -> float:
@@ -47,37 +102,55 @@ class RankingWeights(BaseModel):
             + self.visa_signal_match
         )
 
+    @model_validator(mode="after")
+    def require_positive_total(self) -> "RankingWeights":
+        if self.total <= 0:
+            raise ValueError("at least one ranking weight must be greater than zero")
+        return self
 
-class OutputConfig(BaseModel):
+
+class OutputConfig(StrictConfigModel):
     excel_file: str = "outputs/job_search_tracker.xlsx"
-    top_match_threshold: float = 80
+    top_match_threshold: float = Field(default=80, ge=0, le=100)
 
 
-class JobsConfig(BaseModel):
-    global_filters: GlobalFilters
-    freshness_filter: FreshnessFilter = Field(default_factory=FreshnessFilter)
-    job_categories: list[JobCategoryConfig]
-    ranking_weights: RankingWeights
-    output: OutputConfig
+class UserJobsConfig(StrictConfigModel):
+    """User-editable job filtering and ranking configuration."""
+
+    global_filters: UserJobFilters = Field(default_factory=UserJobFilters)
+    job_categories: list[JobCategoryConfig] = Field(min_length=1, max_length=100)
+    ranking_weights: RankingWeights = Field(default_factory=RankingWeights)
+    output: OutputConfig = Field(default_factory=OutputConfig)
 
 
-class RequiredPreferences(BaseModel):
-    work_arrangement: list[str] = Field(default_factory=list)
+# Import compatibility for processing and Connector type hints.  New code should
+# use ``UserJobsConfig`` explicitly.
+JobsConfig = UserJobsConfig
 
 
-class SalaryExpectation(BaseModel):
-    min_base_salary: float = 0
-    preferred_base_salary: float = 0
+class RequiredPreferences(StrictConfigModel):
+    work_arrangement: list[str] = Field(default_factory=list, max_length=20)
 
 
-class VisaKeywords(BaseModel):
-    positive: list[str] = Field(default_factory=list)
-    negative: list[str] = Field(default_factory=list)
+class SalaryExpectation(StrictConfigModel):
+    min_base_salary: float = Field(default=0, ge=0)
+    preferred_base_salary: float = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def preferred_is_not_below_minimum(self) -> "SalaryExpectation":
+        if self.preferred_base_salary and self.preferred_base_salary < self.min_base_salary:
+            raise ValueError("preferred_base_salary cannot be below min_base_salary")
+        return self
 
 
-class Candidate(BaseModel):
-    target_titles: list[str] = Field(default_factory=list)
-    target_industries: list[str] = Field(default_factory=list)
+class VisaKeywords(StrictConfigModel):
+    positive: list[str] = Field(default_factory=list, max_length=100)
+    negative: list[str] = Field(default_factory=list, max_length=100)
+
+
+class Candidate(StrictConfigModel):
+    target_titles: list[str] = Field(default_factory=list, max_length=200)
+    target_industries: list[str] = Field(default_factory=list, max_length=100)
     required_preferences: RequiredPreferences = Field(default_factory=RequiredPreferences)
     salary_expectation: SalaryExpectation = Field(default_factory=SalaryExpectation)
     visa_keywords: VisaKeywords = Field(default_factory=VisaKeywords)
@@ -97,26 +170,34 @@ class Candidate(BaseModel):
         return lookup
 
 
-class CandidateProfileConfig(BaseModel):
+class CandidateProfileConfig(StrictConfigModel):
     candidate: Candidate
 
 
-class SkillAlias(BaseModel):
-    canonical: str
-    aliases: list[str] = Field(default_factory=list)
+class SkillAlias(StrictConfigModel):
+    canonical: str = Field(min_length=1, max_length=160)
+    aliases: list[str] = Field(default_factory=list, max_length=100)
 
 
-class SkillTaxonomyConfig(BaseModel):
+class SkillTaxonomyConfig(StrictConfigModel):
     skill_aliases: dict[str, SkillAlias] = Field(default_factory=dict)
+
+
+class EffectiveUserConfig(StrictConfigModel):
+    candidate_profile: CandidateProfileConfig
+    jobs_config: UserJobsConfig
+    skill_taxonomy: SkillTaxonomyConfig
 
 
 class NormalizedJob(BaseModel):
     job_id: str
     source: str
+    source_job_id: str | None = None
     category_name: str
     job_title: str
     normalized_title: str
     company: str
+    normalized_company: str = ""
     industry: str = "Unknown"
     location: str
     location_normalized: str = "Unknown"
@@ -129,10 +210,12 @@ class NormalizedJob(BaseModel):
     salary_midpoint: float | None = None
     salary_range_text: str | None = None
     date_posted: str | None = None
+    posted_at: str | None = None
     date_collected: str
     jd_post_link: str
     apply_link: str | None = None
     job_description: str
+    normalized_description: str = ""
     required_skills: list[str] = Field(default_factory=list)
     preferred_skills: list[str] = Field(default_factory=list)
     all_extracted_skills: list[str] = Field(default_factory=list)
@@ -146,13 +229,24 @@ class NormalizedJob(BaseModel):
     application_status: str = "Not Applied"
 
     def to_dict(self) -> dict[str, Any]:
-        if hasattr(self, "model_dump"):
-            return self.model_dump()
-        return self.dict()
+        return self.model_dump()
+
+
+@dataclass(frozen=True)
+class LegacyJobsConfig:
+    """Read-only compatibility view for pre-SaaS processing callers."""
+
+    global_filters: GlobalFilters
+    freshness_filter: FreshnessFilter
+    job_categories: list[JobCategoryConfig]
+    ranking_weights: RankingWeights
+    output: OutputConfig
 
 
 @dataclass(frozen=True)
 class ConfigBundle:
-    jobs: JobsConfig
+    platform_connector: PlatformConnectorConfig
+    user_jobs: UserJobsConfig
+    jobs: LegacyJobsConfig
     candidate_profile: CandidateProfileConfig
     skill_taxonomy: SkillTaxonomyConfig

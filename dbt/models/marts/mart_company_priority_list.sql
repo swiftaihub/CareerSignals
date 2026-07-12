@@ -1,15 +1,19 @@
+{% do require_user_context() %}
 {{ config(
     materialized='incremental',
     schema='mart',
-    unique_key='company',
+    unique_key=['user_uuid', 'run_uuid', 'company'],
     incremental_strategy='delete+insert',
     on_schema_change='sync_all_columns',
-    pre_hook="{{ careersignal_clear_incremental_model() }}",
-    tags=['mart', 'motherduck', 'incremental', 'excel']
+    pre_hook="{{ delete_user_partition() }}",
+    post_hook="{{ purge_unscoped_user_rows() }}",
+    tags=['user', 'mart', 'motherduck', 'excel']
 ) }}
 
 with company_rollup as (
     select
+        user_uuid,
+        run_uuid,
         company,
         any_value(industry) as industry,
         count(*) as matching_roles_count,
@@ -22,10 +26,14 @@ with company_rollup as (
         sum(case when match_tier in ('Good Match', 'Strong Match') then 1 else 0 end) as good_or_strong_count,
         string_agg(distinct visa_signal, ', ') as visa_signal_summary
     from {{ ref('mart_jobs_scored') }}
-    group by company
+    where user_uuid = '{{ var("user_uuid") }}'
+      and run_uuid = '{{ var("run_uuid") }}'
+    group by user_uuid, run_uuid, company
 )
 
 select
+    user_uuid,
+    run_uuid,
     company,
     industry,
     matching_roles_count,
@@ -40,6 +48,3 @@ select
         else 'Low'
     end as priority
 from company_rollup
-order by
-    case priority when 'High' then 1 when 'Medium' then 2 else 3 end,
-    highest_match_score desc
