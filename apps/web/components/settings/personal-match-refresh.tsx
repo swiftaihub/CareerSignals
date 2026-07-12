@@ -3,6 +3,7 @@ import { CheckCircle2, Download, ExternalLink, Loader2, Play, XCircle } from "lu
 
 import { SectionCard } from "@/components/shared/section-card";
 import { formatDateTime } from "@/lib/formatters";
+import { latestApplicablePipelineFailure } from "@/lib/preferences";
 import type { UserPipelineRun } from "@/lib/types";
 
 const ACTIVE_STATES = new Set(["waiting_for_global", "queued", "running"]);
@@ -38,7 +39,7 @@ export function PersonalMatchRefresh({
   const activeRun = runs.find((run) => ACTIVE_STATES.has(run.status));
   const lastAttempt = runs[0];
   const lastSuccessful = runs.find((run) => run.status === "completed");
-  const lastFailure = runs.find((run) => run.status === "failed");
+  const lastFailure = latestApplicablePipelineFailure(runs);
 
   return (
     <SectionCard

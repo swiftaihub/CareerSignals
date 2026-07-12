@@ -3,7 +3,8 @@ import type {
   MatchPriorities,
   MatchPriorityKey,
   PreferenceOption,
-  PreferencesDocument
+  PreferencesDocument,
+  UserPipelineRun
 } from "./types";
 
 export const SETTINGS_SECTION_ORDER = [
@@ -239,6 +240,11 @@ export function preferencesAreDirty(baseline: PreferencesDocument, current: Pref
 
 export function shouldWarnOnNavigation(dirty: boolean, saving: boolean) {
   return dirty && !saving;
+}
+
+export function latestApplicablePipelineFailure(runs: UserPipelineRun[]) {
+  const latestAttempt = runs[0];
+  return latestAttempt?.status === "failed" ? latestAttempt : undefined;
 }
 
 export function validatePreferences(value: PreferencesDocument) {

@@ -6,6 +6,7 @@ import {
   SETTINGS_SECTION_ORDER,
   addTagValue,
   createEmptyPreferences,
+  latestApplicablePipelineFailure,
   mergePreferenceOptions,
   normalizeMatchPriorities,
   preferencesAreDirty,
@@ -101,5 +102,27 @@ describe("dirty settings behavior", () => {
     expect(preferencesAreDirty(baseline, changed)).toBe(true);
     expect(shouldWarnOnNavigation(true, false)).toBe(true);
     expect(shouldWarnOnNavigation(true, true)).toBe(false);
+  });
+});
+
+describe("pipeline status feedback", () => {
+  const failedRun = {
+    run_uuid: "failed-run",
+    status: "failed",
+    submitted_at: "2026-07-11T22:49:26Z",
+    public_error_message: "The pipeline failed. Your previous results are still available."
+  };
+  const completedRun = {
+    run_uuid: "completed-run",
+    status: "completed",
+    submitted_at: "2026-07-12T04:31:47Z"
+  };
+
+  it("does not surface a historical failure after a newer successful run", () => {
+    expect(latestApplicablePipelineFailure([completedRun, failedRun])).toBeUndefined();
+  });
+
+  it("surfaces the error when the latest attempt actually failed", () => {
+    expect(latestApplicablePipelineFailure([failedRun, completedRun])).toBe(failedRun);
   });
 });
