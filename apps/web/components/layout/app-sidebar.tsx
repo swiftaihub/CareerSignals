@@ -7,24 +7,28 @@ import {
   BriefcaseBusiness,
   Building2,
   Gauge,
-  Home,
   Settings,
   ShieldCheck,
   Sparkles
 } from "lucide-react";
 
+import { AUTHENTICATED_NAV_ITEMS } from "@/lib/navigation";
 import type { CurrentUser } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-export const navItems = [
-  { href: "/", label: "Home", icon: Home },
-  { href: "/dashboard", label: "Dashboard", icon: Gauge },
-  { href: "/jobs", label: "Jobs", icon: BriefcaseBusiness },
-  { href: "/top-matches", label: "Top Matches", icon: Sparkles },
-  { href: "/skill-gap", label: "Skill Gap", icon: BarChart3 },
-  { href: "/companies", label: "Companies", icon: Building2 },
-  { href: "/settings", label: "Settings", icon: Settings }
-];
+const navIcons = {
+  "/dashboard": Gauge,
+  "/jobs": BriefcaseBusiness,
+  "/top-matches": Sparkles,
+  "/skill-gap": BarChart3,
+  "/companies": Building2,
+  "/settings": Settings
+};
+
+export const navItems = AUTHENTICATED_NAV_ITEMS.map((item) => ({
+  ...item,
+  icon: navIcons[item.href]
+}));
 
 export const adminItems = [
   { href: "/admin", label: "Admin Dashboard", icon: ShieldCheck },

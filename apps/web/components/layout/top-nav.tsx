@@ -12,7 +12,17 @@ export function TopNav({ user }: { user?: CurrentUser | null }) {
   return (
     <header className="sticky top-0 z-20 border-b border-border bg-background/85 px-4 py-3 backdrop-blur md:px-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
+        <Link
+          aria-label="CareerSignals home"
+          className="flex items-center gap-2 font-bold lg:hidden"
+          href="/"
+        >
+          <span className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
+            CS
+          </span>
+          CareerSignals
+        </Link>
+        <div className="hidden lg:block">
           <div className="text-xs font-semibold uppercase text-muted-foreground">
             CareerSignals Dashboard
           </div>
