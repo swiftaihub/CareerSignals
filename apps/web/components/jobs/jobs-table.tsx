@@ -22,6 +22,7 @@ interface ResponsiveJobsTableProps {
   onPageChange: (page: number) => void;
   onSelectJob: (job: Job) => void;
   onStatusChange: (job: Job, status: string) => Promise<void>;
+  readOnly?: boolean;
 }
 
 const columns = [
@@ -157,7 +158,8 @@ export function ResponsiveJobsTable({
   onSortChange,
   onPageChange,
   onSelectJob,
-  onStatusChange
+  onStatusChange,
+  readOnly = false
 }: ResponsiveJobsTableProps) {
   const [updatingJobId, setUpdatingJobId] = useState<string | null>(null);
   const pageCount = Math.max(Math.ceil(total / pageSize), 1);
@@ -247,7 +249,7 @@ export function ResponsiveJobsTable({
                   <td>
                     <ApplicationStatusSelect
                       className="w-full min-w-0 px-2"
-                      disabled={updatingJobId === job.job_id}
+                      disabled={readOnly || updatingJobId === job.job_id}
                       value={job.application_status}
                       onChange={(value) => updateStatus(job, value)}
                     />
@@ -303,7 +305,7 @@ export function ResponsiveJobsTable({
                 <div className="text-xs font-semibold uppercase text-muted-foreground">Status</div>
                 <ApplicationStatusSelect
                   className="mt-1 w-full"
-                  disabled={updatingJobId === job.job_id}
+                  disabled={readOnly || updatingJobId === job.job_id}
                   value={job.application_status}
                   onChange={(value) => updateStatus(job, value)}
                 />

@@ -25,6 +25,7 @@ from packages.careersignal_core.settings import (
     project_root,
 )
 from packages.careersignal_core.storage.motherduck import MotherDuckService
+from packages.careersignal_core.storage.postgres import PostgresStore
 from packages.careersignal_core.storage.schema import init_motherduck_schema
 from src.config.loader import load_configs
 from src.processing.location_normalization import (
@@ -34,7 +35,7 @@ from src.processing.location_normalization import (
 from src.processing.visa_signal import NO_SPONSORSHIP, SPONSORSHIP_AVAILABLE, UNKNOWN_STATUS
 from src.utils.hashing import stable_hash
 
-PERSONAL_USER_ID = "personal_user"
+LEGACY_LOCAL_USER_UUID = "00000000-0000-0000-0000-000000000001"
 TOP_MATCH_THRESHOLD = 80
 PIPELINE_DAILY_REFRESH_LIMIT = 2
 PIPELINE_QUOTA_RESET_HOUR = 6
@@ -47,6 +48,24 @@ APPLICATION_STATUSES = {
     "Rejected",
     "Offer",
     "Archived",
+    "not_started",
+    "saved",
+    "applied",
+    "interview",
+    "rejected",
+    "offer",
+    "archived",
+}
+
+APPLICATION_STATUS_STORAGE = {
+    "not applied": "not_started",
+    "not_started": "not_started",
+    "saved": "saved",
+    "applied": "applied",
+    "interview": "interview",
+    "rejected": "rejected",
+    "offer": "offer",
+    "archived": "archived",
 }
 
 DISPLAY_COLUMN_MAP: dict[str, str] = {
@@ -272,7 +291,7 @@ class JobRepository(ABC):
         job_id: str,
         application_status: str,
         notes: str | None = None,
-        user_id: str = PERSONAL_USER_ID,
+        user_id: str | None = None,
     ) -> dict[str, Any]:
         raise NotImplementedError
 
@@ -821,9 +840,9 @@ def fail_pipeline_run_state(run_id: str, error_message: str) -> dict[str, Any] |
         return run
 
 
-def _read_local_statuses() -> dict[str, dict[str, Any]]:
+def _read_local_statuses(user_uuid: str = LEGACY_LOCAL_USER_UUID) -> dict[str, dict[str, Any]]:
     raw = _read_json_file(_status_sidecar_path())
-    statuses = raw.get(PERSONAL_USER_ID, raw)
+    statuses = raw.get(user_uuid, raw)
     return statuses if isinstance(statuses, dict) else {}
 
 
@@ -906,8 +925,13 @@ def write_operation_state(**updates: Any) -> None:
 class LocalJobRepository(JobRepository):
     """Reads latest local Excel workbook as a fallback data source."""
 
-    def __init__(self, workbook_path: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        workbook_path: str | Path | None = None,
+        user_uuid: str = LEGACY_LOCAL_USER_UUID,
+    ) -> None:
         self.workbook_path = self._resolve_workbook_path(Path(workbook_path or excel_path()))
+        self.user_uuid = user_uuid
 
     def _resolve_workbook_path(self, configured_path: Path) -> Path:
         if configured_path.exists():
@@ -935,7 +959,7 @@ class LocalJobRepository(JobRepository):
 
     def _jobs(self) -> list[dict[str, Any]]:
         rows = _records(self._sheet("All Jobs"))
-        statuses = _read_local_statuses()
+        statuses = _read_local_statuses(self.user_uuid)
         for row in rows:
             status = statuses.get(str(row.get("job_id")))
             if isinstance(status, dict):
@@ -969,7 +993,7 @@ class LocalJobRepository(JobRepository):
         job_id: str,
         application_status: str,
         notes: str | None = None,
-        user_id: str = PERSONAL_USER_ID,
+        user_id: str | None = None,
     ) -> dict[str, Any]:
         if application_status not in APPLICATION_STATUSES:
             raise ValueError(f"Unsupported application status: {application_status}")
@@ -977,7 +1001,8 @@ class LocalJobRepository(JobRepository):
             raise KeyError(job_id)
 
         state = _read_json_file(_status_sidecar_path())
-        user_state = state.get(user_id)
+        owner = user_id or self.user_uuid
+        user_state = state.get(owner)
         if not isinstance(user_state, dict):
             user_state = {}
         payload = {
@@ -987,7 +1012,7 @@ class LocalJobRepository(JobRepository):
             "updated_at": _now_iso(),
         }
         user_state[job_id] = payload
-        state[user_id] = user_state
+        state[owner] = user_state
         _write_json_file(_status_sidecar_path(), state)
         return payload
 
@@ -1035,8 +1060,13 @@ class LocalJobRepository(JobRepository):
 class MotherDuckJobRepository(JobRepository):
     """Queries dbt mart tables from MotherDuck."""
 
-    def __init__(self, service: MotherDuckService | None = None) -> None:
+    def __init__(
+        self,
+        service: MotherDuckService | None = None,
+        user_uuid: str = LEGACY_LOCAL_USER_UUID,
+    ) -> None:
         self.service = service or MotherDuckService()
+        self.user_uuid = user_uuid
         self._available_columns: set[str] | None = None
 
     def _query(self, sql: str, params: list[Any] | tuple[Any, ...] | None = None) -> list[dict[str, Any]]:
@@ -1105,7 +1135,7 @@ class MotherDuckJobRepository(JobRepository):
 
     def _where_sql(self, filters: JobFilters) -> tuple[str, list[Any]]:
         clauses: list[str] = []
-        params: list[Any] = [PERSONAL_USER_ID]
+        params: list[Any] = [self.user_uuid]
         available_columns = self._mart_columns()
         exact_filters = {
             "category_name": filters.category_name,
@@ -1216,7 +1246,7 @@ class MotherDuckJobRepository(JobRepository):
             where job_id = ?
             limit 1
             """,
-            [PERSONAL_USER_ID, job_id],
+            [self.user_uuid, job_id],
         )
         return rows[0] if rows else None
 
@@ -1225,7 +1255,7 @@ class MotherDuckJobRepository(JobRepository):
         job_id: str,
         application_status: str,
         notes: str | None = None,
-        user_id: str = PERSONAL_USER_ID,
+        user_id: str | None = None,
     ) -> dict[str, Any]:
         if application_status not in APPLICATION_STATUSES:
             raise ValueError(f"Unsupported application status: {application_status}")
@@ -1245,7 +1275,7 @@ class MotherDuckJobRepository(JobRepository):
             )
             values (?, ?, ?, ?, ?)
             """,
-            [user_id, job_id, application_status, notes, updated_at],
+            [user_id or self.user_uuid, job_id, application_status, notes, updated_at],
         )
         return {
             "job_id": job_id,
@@ -1368,7 +1398,269 @@ class MotherDuckJobRepository(JobRepository):
         )
 
 
-def build_job_repository() -> JobRepository:
+class PostgresJobRepository(JobRepository):
+    """Tenant-scoped serving repository backed by PostgreSQL current partitions."""
+
+    def __init__(self, user_uuid: str, store: PostgresStore | None = None) -> None:
+        if not user_uuid:
+            raise ValueError("A verified user UUID is required")
+        self.user_uuid = str(user_uuid)
+        self.store = store or PostgresStore()
+
+    @staticmethod
+    def _status_display_sql() -> str:
+        return """
+            case coalesce(status.application_status, 'not_started')
+              when 'not_started' then 'Not Applied'
+              else initcap(status.application_status)
+            end
+        """
+
+    def _base_sql(self) -> str:
+        status_display = self._status_display_sql()
+        return f"""
+            select
+                jobs.job_id,
+                matches.category_name,
+                case
+                  when matches.match_score >= 90 then 'Excellent Match'
+                  when matches.match_score >= 80 then 'Strong Match'
+                  when matches.match_score >= 70 then 'Good Match'
+                  else 'Low Priority'
+                end as match_tier,
+                matches.match_score,
+                jobs.title as job_title,
+                jobs.title as normalized_title,
+                jobs.company_name as company,
+                jobs.industry,
+                jobs.location,
+                jobs.location as location_normalized,
+                jobs.location_group,
+                jobs.work_arrangement,
+                jobs.seniority,
+                null::text as employment_type,
+                case
+                  when jobs.salary_min is null and jobs.salary_max is null then null
+                  else concat_ws(' - ', jobs.salary_min::text, jobs.salary_max::text)
+                end as salary_range_text,
+                jobs.salary_min,
+                jobs.salary_max,
+                case
+                  when jobs.salary_min is not null and jobs.salary_max is not null
+                    then (jobs.salary_min + jobs.salary_max) / 2.0
+                  else coalesce(jobs.salary_min, jobs.salary_max)
+                end as salary_midpoint,
+                jobs.visa_signal,
+                case
+                  when lower(coalesce(jobs.visa_signal, '')) = 'positive' then 'Sponsorship Available'
+                  when lower(coalesce(jobs.visa_signal, '')) = 'negative' then 'No Sponsorship'
+                  else 'Unknown'
+                end as visa_status,
+                null::text as visa_evidence,
+                'Low'::text as visa_confidence,
+                matches.matched_skills as required_skills,
+                '[]'::jsonb as preferred_skills,
+                matches.matched_skills as all_extracted_skills,
+                jobs.apply_url as jd_post_link,
+                jobs.apply_url as apply_link,
+                jobs.posted_at as date_posted,
+                jobs.last_seen_at as date_collected,
+                jobs.source_name as source,
+                {status_display} as application_status,
+                status.notes,
+                status.updated_at as application_updated_at,
+                matches.ranking_reasons as reasoning_summary,
+                matches.run_uuid,
+                matches.created_at as inserted_at,
+                matches.title_score,
+                matches.required_skill_score,
+                matches.preferred_skill_score,
+                matches.industry_score,
+                matches.salary_score,
+                matches.work_arrangement_score,
+                matches.visa_score,
+                matches.missing_skills,
+                matches.is_top_match
+            from public.user_job_matches matches
+            join public.job_postings jobs on jobs.job_id = matches.job_id
+            left join public.user_job_statuses status
+              on status.user_uuid = matches.user_uuid and status.job_id = matches.job_id
+            where matches.user_uuid = %s and matches.is_current = true
+        """
+
+    def _clauses(self, filters: JobFilters) -> tuple[list[str], list[Any]]:
+        clauses: list[str] = []
+        params: list[Any] = [self.user_uuid]
+        exact = {
+            "category_name": filters.category_name,
+            "work_arrangement": filters.work_arrangement,
+            "visa_signal": filters.visa_signal,
+            "location_group": filters.location_group,
+        }
+        for column, value in exact.items():
+            if value:
+                clauses.append(f"lower(coalesce({column}, '')) = lower(%s)")
+                params.append(value)
+        contains = {
+            "company": filters.company,
+            "industry": filters.industry,
+            "location": filters.location,
+        }
+        for column, value in contains.items():
+            if value:
+                clauses.append(f"coalesce({column}, '') ilike %s")
+                params.append(f"%{value}%")
+        if filters.application_status:
+            clauses.append("lower(application_status) = lower(%s)")
+            display = "Not Applied" if filters.application_status == "not_started" else filters.application_status
+            params.append(display)
+        if filters.min_match_score is not None:
+            clauses.append("match_score >= %s")
+            params.append(filters.min_match_score)
+        if filters.max_match_score is not None:
+            clauses.append("match_score <= %s")
+            params.append(filters.max_match_score)
+        if filters.search:
+            clauses.append(
+                "concat_ws(' ', job_title, company, industry, location, required_skills::text, reasoning_summary::text) ilike %s"
+            )
+            params.append(f"%{filters.search}%")
+        if filters.posted_start_date:
+            clauses.append("date_posted::date >= %s")
+            params.append(_coerce_date(filters.posted_start_date))
+        if filters.posted_end_date:
+            clauses.append("date_posted::date <= %s")
+            params.append(_coerce_date(filters.posted_end_date))
+        return clauses, params
+
+    def get_jobs(self, filters: JobFilters) -> PaginatedJobs:
+        clauses, params = self._clauses(filters)
+        outer_where = " where " + " and ".join(clauses) if clauses else ""
+        base = self._base_sql()
+        count = self.store.fetch_one(
+            f"select count(*) as total from ({base}) scoped{outer_where}", params
+        )
+        sort_column = filters.resolved_sort_by
+        items = self.store.fetch_all(
+            f"""
+            select * from ({base}) scoped
+            {outer_where}
+            order by {sort_column} {filters.resolved_sort_order} nulls last, match_score desc
+            limit %s offset %s
+            """,
+            [*params, filters.resolved_limit, filters.resolved_offset],
+        )
+        return PaginatedJobs(
+            total=int((count or {}).get("total", 0)),
+            items=[_apply_derived_fields(_normalize_record(row)) for row in items],
+            page=filters.resolved_page,
+            page_size=filters.resolved_page_size,
+            limit=filters.resolved_limit,
+            offset=filters.resolved_offset,
+        )
+
+    def get_job(self, job_id: str) -> dict[str, Any] | None:
+        row = self.store.fetch_one(
+            f"select * from ({self._base_sql()}) scoped where job_id = %s limit 1",
+            [self.user_uuid, job_id],
+        )
+        return _apply_derived_fields(_normalize_record(row)) if row else None
+
+    def update_job_status(
+        self,
+        job_id: str,
+        application_status: str,
+        notes: str | None = None,
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
+        if self.get_job(job_id) is None:
+            raise KeyError(job_id)
+        stored_status = APPLICATION_STATUS_STORAGE.get(application_status.strip().casefold())
+        if stored_status is None:
+            raise ValueError(f"Unsupported application status: {application_status}")
+        row = self.store.fetch_one(
+            """
+            insert into public.user_job_statuses (
+              user_uuid, job_id, application_status, notes, updated_at
+            ) values (%s, %s, %s, %s, now())
+            on conflict (user_uuid, job_id) do update set
+              application_status = excluded.application_status,
+              notes = excluded.notes,
+              updated_at = now()
+            returning job_id,
+              case application_status when 'not_started' then 'Not Applied'
+                   else initcap(application_status) end as application_status,
+              notes, updated_at
+            """,
+            [self.user_uuid, job_id, stored_status, notes],
+        )
+        assert row is not None
+        return row
+
+    def get_filter_options(self) -> dict[str, list[str]]:
+        rows = self.get_jobs(JobFilters(limit=5000)).items
+        return {
+            option_name: _option_values(rows, field)
+            for option_name, field in FILTER_OPTION_FIELDS.items()
+        }
+
+    def get_facets(self) -> dict[str, Any]:
+        rows = self.get_jobs(JobFilters(limit=5000)).items
+        return build_location_facets(row.get("location") for row in rows)
+
+    def get_top_matches(self) -> list[dict[str, Any]]:
+        return self.get_jobs(
+            JobFilters(limit=5000, min_match_score=TOP_MATCH_THRESHOLD, sort_by="match_score")
+        ).items
+
+    def _summary(self, table: str, key: str) -> list[dict[str, Any]]:
+        rows = self.store.fetch_all(
+            f"""
+            select {key}, metrics
+            from public.{table}
+            where user_uuid = %s and is_current = true
+            order by {key}
+            """,
+            [self.user_uuid],
+        )
+        return [{key: row[key], **(row.get("metrics") or {})} for row in rows]
+
+    def get_category_summary(self) -> list[dict[str, Any]]:
+        return self._summary("user_category_summary", "category_name")
+
+    def get_skill_gap(self) -> list[dict[str, Any]]:
+        rows = self._summary("user_skill_gap", "canonical_skill")
+        return [{"skill": row.pop("canonical_skill"), **row} for row in rows]
+
+    def get_company_priority(self) -> list[dict[str, Any]]:
+        rows = self._summary("user_company_priority", "company_name")
+        return [{"company": row.pop("company_name"), **row} for row in rows]
+
+    def get_status(self) -> dict[str, Any]:
+        run = self.store.fetch_one(
+            """
+            select status::text as status, completed_at, published_at, jobs_matched
+            from public.user_pipeline_runs
+            where user_uuid = %s and is_current_result = true
+            limit 1
+            """,
+            [self.user_uuid],
+        ) or {}
+        return {
+            "data_mode": "postgres",
+            "database": "PostgreSQL",
+            "mart_tables_available": bool(run),
+            "latest_run_status": run.get("status"),
+            "last_pipeline_run_at": run.get("completed_at"),
+            "data_as_of": run.get("published_at"),
+            "jobs_matched": run.get("jobs_matched", 0),
+        }
+
+
+def build_job_repository(user_uuid: str | None = None) -> JobRepository:
+    owner = user_uuid or LEGACY_LOCAL_USER_UUID
+    if data_mode() == "postgres":
+        return PostgresJobRepository(owner)
     if data_mode() == "motherduck":
-        return MotherDuckJobRepository()
-    return LocalJobRepository()
+        return MotherDuckJobRepository(user_uuid=owner)
+    return LocalJobRepository(user_uuid=owner)

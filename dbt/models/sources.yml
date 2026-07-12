@@ -11,10 +11,16 @@ sources:
   - name: staging
     schema: staging
     tables:
+      - name: shared_jobs_processed
+      - name: shared_job_observations
       - name: python_jobs_processed
       - name: python_candidate_skills
 
   - name: app
     schema: app
     tables:
+      - name: user_config_snapshots
+      - name: user_candidate_skills
+      - name: user_job_preferences
+      - name: user_skill_aliases
       - name: job_application_status

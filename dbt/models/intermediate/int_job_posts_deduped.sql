@@ -4,54 +4,31 @@
     unique_key='job_id',
     incremental_strategy='delete+insert',
     on_schema_change='sync_all_columns',
-    pre_hook="{{ careersignal_clear_incremental_model() }}",
-    tags=['intermediate', 'motherduck', 'incremental']
+    post_hook="{{ purge_unscoped_shared_rows() }}",
+    tags=['shared', 'intermediate', 'motherduck']
 ) }}
 
 with ranked as (
     select
         *,
+        min(first_seen_at) over (partition by job_id) as canonical_first_seen_at,
+        max(last_seen_at) over (partition by job_id) as canonical_last_seen_at,
         row_number() over (
             partition by job_id
-            order by inserted_at desc
-        ) as rn
+            order by last_seen_at desc, inserted_at desc, connector_run_uuid desc
+        ) as row_number_for_job
     from {{ ref('stg_job_posts') }}
 )
 
 select
-    job_id,
-    run_id,
-    source,
-    category_name,
-    job_title,
-    normalized_title,
-    company,
-    industry,
-    location,
-    location_normalized,
-    location_group,
-    work_arrangement,
-    employment_type,
-    seniority,
-    salary_min,
-    salary_max,
-    salary_midpoint,
-    salary_range_text,
-    date_posted,
-    date_collected,
-    jd_post_link,
-    apply_link,
-    job_description,
-    required_skills,
-    preferred_skills,
-    all_extracted_skills,
-    visa_signal,
-    visa_status,
-    visa_evidence,
-    visa_confidence,
-    match_score,
-    match_tier,
-    reasoning_summary,
-    inserted_at
+    * exclude (
+        row_number_for_job,
+        first_seen_at,
+        last_seen_at,
+        canonical_first_seen_at,
+        canonical_last_seen_at
+    ),
+    canonical_first_seen_at as first_seen_at,
+    canonical_last_seen_at as last_seen_at
 from ranked
-where rn = 1
+where row_number_for_job = 1
