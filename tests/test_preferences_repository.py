@@ -255,15 +255,29 @@ def test_pipeline_run_persists_bundle_identity_from_immutable_snapshot() -> None
     assert created["config_bundle_revision_uuid"] == OLD_BUNDLE_UUID
 
 
-class AliasConnection:
-    def __init__(self) -> None:
-        self.rows: list[list[Any]] = []
+class AliasCursor:
+    def __init__(self, rows: list[list[Any]]) -> None:
+        self.rows = rows
+
+    def __enter__(self) -> "AliasCursor":
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        return None
 
     def executemany(self, statement: str, rows: list[list[Any]]) -> None:
         assert "insert into public.skill_alias_catalog" in " ".join(
             statement.casefold().split()
         )
         self.rows.extend(rows)
+
+
+class AliasConnection:
+    def __init__(self) -> None:
+        self.rows: list[list[Any]] = []
+
+    def cursor(self) -> AliasCursor:
+        return AliasCursor(self.rows)
 
 
 class AliasStore:

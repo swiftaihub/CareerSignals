@@ -39,8 +39,9 @@ class PostgresStore:
         if not materialized:
             return 0
         with self.pool.transaction() as connection:
-            cursor = connection.executemany(statement, materialized)
-            return cursor.rowcount
+            with connection.cursor() as cursor:
+                cursor.executemany(statement, materialized)
+                return cursor.rowcount
 
     @contextmanager
     def transaction(self) -> Iterator[Connection[Any]]:

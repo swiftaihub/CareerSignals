@@ -623,22 +623,23 @@ class PreferencesRepository:
         if not rows:
             return
         with self.store.transaction() as connection:
-            connection.executemany(
-                """
-                insert into public.skill_alias_catalog (
-                    canonical_skill, normalized_canonical_skill, alias,
-                    normalized_alias, category, industry, source, confidence,
-                    generator_version
-                ) values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                on conflict (normalized_canonical_skill, normalized_alias) do update set
-                    canonical_skill = excluded.canonical_skill,
-                    alias = excluded.alias,
-                    category = coalesce(excluded.category, skill_alias_catalog.category),
-                    industry = coalesce(excluded.industry, skill_alias_catalog.industry),
-                    source = excluded.source,
-                    confidence = excluded.confidence,
-                    generator_version = excluded.generator_version,
-                    updated_at = now()
-                """,
-                rows,
-            )
+            with connection.cursor() as cursor:
+                cursor.executemany(
+                    """
+                    insert into public.skill_alias_catalog (
+                        canonical_skill, normalized_canonical_skill, alias,
+                        normalized_alias, category, industry, source, confidence,
+                        generator_version
+                    ) values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    on conflict (normalized_canonical_skill, normalized_alias) do update set
+                        canonical_skill = excluded.canonical_skill,
+                        alias = excluded.alias,
+                        category = coalesce(excluded.category, skill_alias_catalog.category),
+                        industry = coalesce(excluded.industry, skill_alias_catalog.industry),
+                        source = excluded.source,
+                        confidence = excluded.confidence,
+                        generator_version = excluded.generator_version,
+                        updated_at = now()
+                    """,
+                    rows,
+                )
