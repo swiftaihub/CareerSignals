@@ -10,6 +10,7 @@ import type {
 
 export const SETTINGS_SECTION_ORDER = [
   "settings-overview",
+  "account-security",
   "shared-data-freshness",
   "personal-match-refresh",
   "search-preferences",

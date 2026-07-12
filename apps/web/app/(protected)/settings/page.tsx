@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAccount } from "@/components/auth/account-context";
 import { AppShell } from "@/components/layout/app-shell";
 import { PageHeader } from "@/components/layout/page-header";
+import { AccountSecurity } from "@/components/settings/account-security";
 import { AdvancedHistory } from "@/components/settings/advanced-history";
 import { MatchPriorityRadar } from "@/components/settings/match-priority-radar";
 import { PersonalMatchRefresh } from "@/components/settings/personal-match-refresh";
@@ -65,6 +66,7 @@ export default function SettingsPage() {
   const [quota, setQuota] = useState<PipelineQuota | null>(null);
   const [loading, setLoading] = useState(true);
   const [preferenceBusy, setPreferenceBusy] = useState(false);
+  const [securityBusy, setSecurityBusy] = useState(false);
   const [pipelineBusy, setPipelineBusy] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [notice, setNotice] = useState("");
@@ -131,7 +133,7 @@ export default function SettingsPage() {
   const validationErrors = preferences ? validatePreferences(preferences) : [];
 
   useEffect(() => {
-    const warn = shouldWarnOnNavigation(dirty, preferenceBusy);
+    const warn = shouldWarnOnNavigation(dirty, preferenceBusy || securityBusy);
     function handleBeforeUnload(event: BeforeUnloadEvent) {
       if (!warn) return;
       event.preventDefault();
@@ -154,7 +156,7 @@ export default function SettingsPage() {
       window.removeEventListener("beforeunload", handleBeforeUnload);
       document.removeEventListener("click", handleLinkClick, true);
     };
-  }, [dirty, preferenceBusy]);
+  }, [dirty, preferenceBusy, securityBusy]);
 
   async function startPipeline() {
     setPipelineBusy(true);
@@ -306,6 +308,11 @@ export default function SettingsPage() {
         {notice ? <p className={`mb-5 rounded-lg border p-3 text-sm font-medium ${notice.includes("unavailable") ? "border-amber-200 bg-amber-50 text-amber-900" : "border-emerald-200 bg-emerald-50 text-emerald-900"}`} aria-live="polite">{notice}</p> : null}
 
         <SettingsOverview freshness={freshness} profileCompleteness={preferences.profile_completeness} quota={quota} runs={runs} />
+        <AccountSecurity
+          onBusyChange={setSecurityBusy}
+          preferencesDirty={dirty}
+          readOnly={readOnly}
+        />
         <SharedDataFreshness freshness={freshness} />
         <PersonalMatchRefresh
           busy={pipelineBusy}
@@ -318,7 +325,7 @@ export default function SettingsPage() {
           onStart={startPipeline}
         />
         <SearchPreferencesForm
-          disabled={readOnly || preferenceBusy}
+          disabled={readOnly || preferenceBusy || securityBusy}
           errors={validationErrors}
           options={options}
           loadOptions={loadDynamicOptions}
@@ -327,18 +334,18 @@ export default function SettingsPage() {
         />
         <SkillsEditor
           categories={preferences.skill_categories}
-          disabled={readOnly || preferenceBusy}
+          disabled={readOnly || preferenceBusy || securityBusy}
           skills={preferences.skills}
           onCategoriesChange={(skillCategories) => setPreferences((current) => current ? { ...current, skill_categories: skillCategories } : current)}
           onSkillsChange={(skills) => setPreferences((current) => current ? { ...current, skills } : current)}
         />
         <MatchPriorityRadar
-          disabled={readOnly || preferenceBusy}
+          disabled={readOnly || preferenceBusy || securityBusy}
           value={preferences.match_priorities}
           onChange={(matchPriorities) => setPreferences((current) => current ? { ...current, match_priorities: matchPriorities } : current)}
         />
         <AdvancedHistory
-          busy={preferenceBusy}
+          busy={preferenceBusy || securityBusy}
           history={preferences.revision_history}
           preview={preferences.generated_preview}
           readOnly={readOnly}
@@ -353,7 +360,7 @@ export default function SettingsPage() {
         dirty={dirty}
         errors={validationErrors}
         readOnly={readOnly}
-        saving={preferenceBusy}
+        saving={preferenceBusy || securityBusy}
         onDiscard={discard}
         onSave={save}
       />
