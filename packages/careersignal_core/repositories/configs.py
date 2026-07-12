@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import datetime
 from typing import Any, Mapping
 from uuid import UUID
 
@@ -23,6 +22,23 @@ from src.config.loader import (
 
 def _dict(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _coherent_bundle_uuid(rows: Mapping[str, Mapping[str, Any]]) -> str | None:
+    """Return the shared non-null bundle UUID only for an exact 3-document set."""
+
+    if set(rows) != set(CONFIG_TYPES):
+        return None
+    values = {
+        str(row.get("bundle_revision_uuid"))
+        for row in rows.values()
+        if row.get("bundle_revision_uuid") is not None
+    }
+    if len(values) != 1 or any(
+        row.get("bundle_revision_uuid") is None for row in rows.values()
+    ):
+        return None
+    return next(iter(values))
 
 
 def _field_sources(default: Any, override: Any, prefix: str = "") -> dict[str, str]:
@@ -76,7 +92,8 @@ class ConfigRepository:
         row = self.store.fetch_one(
             """
             select config_uuid, user_uuid, config_type::text as config_type, override_json,
-                   schema_version, revision, effective_config_hash, created_at, updated_at
+                   schema_version, revision, effective_config_hash, bundle_revision_uuid,
+                   created_at, updated_at
             from public.user_config_documents
             where user_uuid = %s and config_type = %s::public.config_type
             """,
@@ -132,40 +149,25 @@ class ConfigRepository:
             revision = int(current["revision"]) + 1
             connection.execute(
                 """
-                insert into public.user_config_versions (
-                    user_uuid, config_type, revision, override_json,
-                    changed_by_user_uuid, change_source
-                ) values (%s, %s::public.config_type, %s, %s::jsonb, %s, %s)
+                select set_config('careersignals.changed_by_user_uuid', %s, true),
+                       set_config('careersignals.config_change_source', %s, true)
                 """,
-                [
-                    str(user_uuid),
-                    config_type,
-                    revision,
-                    Jsonb(normalized_override),
-                    str(changed_by_user_uuid),
-                    change_source,
-                ],
+                [str(changed_by_user_uuid), change_source],
             )
-            connection.execute(
+            saved = connection.execute(
                 """
                 update public.user_config_documents
-                set override_json = %s::jsonb, revision = %s,
-                    effective_config_hash = %s, updated_at = now()
+                set override_json = %s::jsonb,
+                    effective_config_hash = %s,
+                    bundle_revision_uuid = null,
+                    updated_at = now()
                 where user_uuid = %s and config_type = %s::public.config_type
+                returning revision
                 """,
-                [Jsonb(normalized_override), revision, digest, str(user_uuid), config_type],
-            )
-            connection.execute(
-                """
-                insert into public.user_activity_events (user_uuid, event_name, metadata)
-                values (%s, 'config_updated', jsonb_build_object(
-                    'config_type', %s::text,
-                    'revision', %s::integer,
-                    'change_source', %s::text
-                ))
-                """,
-                [str(user_uuid), config_type, revision, change_source],
-            )
+                [Jsonb(normalized_override), digest, str(user_uuid), config_type],
+            ).fetchone()
+            if saved is None or int(saved["revision"]) != revision:
+                raise RuntimeError("Configuration revision trigger returned an unexpected revision")
         return self.get(user_uuid, config_type)
 
     def update(
@@ -217,7 +219,8 @@ class ConfigRepository:
         return self.store.fetch_all(
             """
             select version_uuid, user_uuid, config_type::text as config_type, revision,
-                   override_json, changed_by_user_uuid, change_source, created_at
+                   override_json, changed_by_user_uuid, change_source,
+                   bundle_revision_uuid, created_at
             from public.user_config_versions
             where user_uuid = %s and config_type = %s::public.config_type
             order by revision desc
@@ -256,10 +259,12 @@ class ConfigRepository:
             row["config_type"]: {
                 "override_json": _dict(row.get("override_json")),
                 "revision": int(row.get("revision") or 1),
+                "bundle_revision_uuid": row.get("bundle_revision_uuid"),
             }
             for row in self.store.fetch_all(
                 """
-                select config_type::text as config_type, override_json, revision
+                select config_type::text as config_type, override_json, revision,
+                       bundle_revision_uuid
                 from public.user_config_documents
                 where user_uuid = %s
                 """,
@@ -268,14 +273,18 @@ class ConfigRepository:
         }
         if set(rows) != set(CONFIG_TYPES):
             raise NotFoundError("One or more user configuration documents are missing")
-        return build_config_snapshot(rows)
+        return build_config_snapshot(
+            rows,
+            config_bundle_revision_uuid=_coherent_bundle_uuid(rows),
+        )
 
     def active_user_snapshots(self) -> list[dict[str, Any]]:
         """Return effective config snapshots for every active non-Demo user."""
 
         rows = self.store.fetch_all(
             """
-            select p.user_uuid, d.config_type::text as config_type, d.override_json, d.revision
+            select p.user_uuid, d.config_type::text as config_type, d.override_json, d.revision,
+                   d.bundle_revision_uuid
             from public.user_profiles p
             join public.user_config_documents d on d.user_uuid = p.user_uuid
             where p.deleted_at is null
@@ -291,13 +300,22 @@ class ConfigRepository:
             grouped.setdefault(user_uuid, {})[row["config_type"]] = {
                 "override_json": _dict(row.get("override_json")),
                 "revision": int(row.get("revision") or 1),
+                "bundle_revision_uuid": row.get("bundle_revision_uuid"),
             }
 
         snapshots: list[dict[str, Any]] = []
         for user_uuid, documents in grouped.items():
             if set(documents) != set(CONFIG_TYPES):
                 raise NotFoundError(f"Configuration documents are missing for user {user_uuid}")
-            snapshots.append({"user_uuid": user_uuid, **build_config_snapshot(documents)})
+            snapshots.append(
+                {
+                    "user_uuid": user_uuid,
+                    **build_config_snapshot(
+                        documents,
+                        config_bundle_revision_uuid=_coherent_bundle_uuid(documents),
+                    ),
+                }
+            )
         return snapshots
 
     def is_eligible_for_global_refresh(self, user_uuid: UUID | str) -> bool:

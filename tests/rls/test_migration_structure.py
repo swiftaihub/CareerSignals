@@ -18,12 +18,15 @@ EXPECTED_MIGRATIONS = [
     "0012_pipeline_waiting_status.sql",
     "0013_global_bootstrap_pipeline.sql",
     "0014_cumulative_personal_results.sql",
+    "0015_config_bundle_revisions.sql",
 ]
 
 RLS_TABLES = {
     "user_profiles",
     "user_config_documents",
     "user_config_versions",
+    "config_bundle_revisions",
+    "skill_alias_catalog",
     "entitlement_events",
     "billing_events",
     "connector_refresh_runs",
@@ -60,7 +63,12 @@ def test_every_control_plane_table_is_created() -> None:
 
 def test_rls_is_enabled_and_forced_for_every_table() -> None:
     rls_sql = "\n".join(
-        _sql(name) for name in ("0010_rls_policies.sql", "0013_global_bootstrap_pipeline.sql")
+        _sql(name)
+        for name in (
+            "0010_rls_policies.sql",
+            "0013_global_bootstrap_pipeline.sql",
+            "0015_config_bundle_revisions.sql",
+        )
     )
     for table in RLS_TABLES:
         assert f"alter table public.{table} enable row level security" in rls_sql
@@ -104,6 +112,32 @@ def test_cumulative_personal_result_lineage_is_migrated() -> None:
 
     assert "upr.status in ('running', 'completed')" in migration
     assert "does not require the latest-result run" in migration
+
+
+def test_config_bundles_are_atomic_tenant_scoped_and_pipeline_bound() -> None:
+    migration = _sql("0015_config_bundle_revisions.sql")
+
+    assert "create table public.config_bundle_revisions" in migration
+    assert "compiled_overrides jsonb not null" in migration
+    assert "compiled_configs jsonb" in migration
+    assert "config_revision_map jsonb not null" in migration
+    assert "user_config_versions_one_type_per_bundle" in migration
+    assert "foreign key (user_uuid, bundle_revision_uuid)" in migration
+    assert "add column config_bundle_revision_uuid uuid" in migration
+    assert "user_pipeline_runs_bundle_user_fk" in migration
+    assert "config_bundle_revisions_append_only" in migration
+    assert "config_bundle_revisions_reject_demo_mutation" in migration
+    assert "config_bundle_revisions_self_or_admin_select" in migration
+
+
+def test_shared_skill_alias_catalog_has_normalized_dedup_and_admin_only_rls() -> None:
+    migration = _sql("0015_config_bundle_revisions.sql")
+
+    assert "create table public.skill_alias_catalog" in migration
+    assert "unique (normalized_canonical_skill, normalized_alias)" in migration
+    assert "confidence between 0 and 1" in migration
+    assert "skill_alias_catalog_admin_select" in migration
+    assert "using (public.is_current_user_admin())" in migration
 
 
 def test_demo_seed_is_fixed_read_only_and_has_exactly_twenty_jobs() -> None:

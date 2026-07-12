@@ -7,6 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 from typing import Any, Mapping, TypeVar
+from uuid import UUID
 
 import yaml
 from pydantic import BaseModel, ValidationError
@@ -185,6 +186,8 @@ def _override_and_revision(value: Mapping[str, Any] | None) -> tuple[dict[str, A
 def build_config_snapshot(
     overrides_by_type: Mapping[str, Mapping[str, Any] | None],
     project_root: str | Path | None = None,
+    *,
+    config_bundle_revision_uuid: str | UUID | None = None,
 ) -> dict[str, Any]:
     """Build a detached, validated immutable-by-convention config snapshot."""
 
@@ -201,11 +204,22 @@ def build_config_snapshot(
         configs[config_type] = validate_user_config(config_type, effective)
         revisions[config_type] = revision
 
-    snapshot_body = {
-        "schema_version": 1,
+    bundle_uuid: str | None = None
+    if config_bundle_revision_uuid is not None:
+        try:
+            bundle_uuid = str(UUID(str(config_bundle_revision_uuid)))
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise ConfigLoadError(
+                "config_bundle_revision_uuid must be a valid UUID"
+            ) from exc
+
+    snapshot_body: dict[str, Any] = {
+        "schema_version": 2 if bundle_uuid else 1,
         "configs": configs,
         "config_revision_map": revisions,
     }
+    if bundle_uuid:
+        snapshot_body["config_bundle_revision_uuid"] = bundle_uuid
     return deepcopy(
         {
             **snapshot_body,

@@ -15,6 +15,10 @@ class ConflictError(RepositoryError):
     error_code = "CONFLICT"
 
 
+class ConfigBundleConflictError(ConflictError):
+    error_code = "CONFIG_BUNDLE_CONFLICT"
+
+
 class PipelineAlreadyActiveError(ConflictError):
     error_code = "PIPELINE_ALREADY_ACTIVE"
 

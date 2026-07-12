@@ -35,6 +35,7 @@ from apps.api.routers import (
     jobs,
     me,
     pipeline_runs,
+    preferences,
 )
 from packages.careersignal_core.repositories.errors import NotFoundError, RepositoryError
 from packages.careersignal_core.settings import get_settings
@@ -145,6 +146,7 @@ def create_app() -> FastAPI:
     application.include_router(jobs.router)
     application.include_router(configs.router)
     application.include_router(pipeline_runs.router)
+    application.include_router(preferences.router)
     application.include_router(data_freshness.router)
     application.include_router(exports.router)
     application.include_router(admin_metrics.router)

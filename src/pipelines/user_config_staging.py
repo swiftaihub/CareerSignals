@@ -41,11 +41,24 @@ def validate_config_snapshot(config_snapshot: Mapping[str, Any]) -> dict[str, An
     normalized_revisions = {
         config_type: int(revisions.get(config_type) or 0) for config_type in CONFIG_TYPES
     }
-    body = {
-        "schema_version": int(snapshot.get("schema_version") or 1),
+    raw_bundle_uuid = snapshot.get("config_bundle_revision_uuid")
+    bundle_uuid = (
+        _uuid(str(raw_bundle_uuid), "config_bundle_revision_uuid")
+        if raw_bundle_uuid is not None
+        else None
+    )
+    schema_version = int(snapshot.get("schema_version") or 1)
+    if bundle_uuid and schema_version < 2:
+        raise ValueError(
+            "config_bundle_revision_uuid requires config snapshot schema_version 2 or newer"
+        )
+    body: dict[str, Any] = {
+        "schema_version": schema_version,
         "configs": normalized_configs,
         "config_revision_map": normalized_revisions,
     }
+    if bundle_uuid:
+        body["config_bundle_revision_uuid"] = bundle_uuid
     calculated_hash = effective_config_hash(body)
     supplied_hash = str(snapshot.get("config_hash") or "")
     if supplied_hash and supplied_hash != calculated_hash:

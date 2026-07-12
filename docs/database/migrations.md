@@ -1,7 +1,7 @@
 # Database migrations and rollback
 
 CareerSignals uses an ordered, forward-only Supabase migration stack in
-`supabase/migrations`. The fourteen files must be applied in numeric order. They
+`supabase/migrations`. The fifteen files must be applied in numeric order. They
 create the PostgreSQL control plane, serving tables, helper functions, RLS,
 constraints, and indexes. No migration or seed contains credentials.
 
@@ -42,6 +42,10 @@ audited backend service operations.
   new run completed.
 - Configuration history, entitlement events, pipeline events, and Admin audit
   logs are append-only.
+- User-friendly preference saves create one append-only bundle revision and
+  associate exactly one version of each generated config document with it. New
+  personal runs retain that bundle UUID in addition to their immutable JSON
+  snapshot; legacy runs remain valid with a null bundle reference.
 - RLS is enabled and forced on every application/control-plane table.
 - Demo rows have a service-role-resistant trigger guard. Only the transaction-
   local seed override in the deterministic seed may write them.

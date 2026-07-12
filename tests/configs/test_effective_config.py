@@ -13,6 +13,10 @@ from src.config.loader import (
     merge_config,
     validate_user_config,
 )
+from src.pipelines.user_config_staging import validate_config_snapshot
+
+
+BUNDLE_UUID = "44444444-4444-4444-8444-444444444444"
 
 
 def test_empty_overrides_produce_exact_validated_defaults() -> None:
@@ -77,3 +81,22 @@ def test_snapshot_hash_and_revisions_are_deterministic_and_detached() -> None:
 def test_unknown_config_type_is_rejected() -> None:
     with pytest.raises(ConfigLoadError, match="Unsupported config type"):
         load_default_config("platform_connector_config")
+
+
+def test_bundle_snapshot_hashes_and_round_trips_bundle_identity() -> None:
+    snapshot = build_config_snapshot(
+        {},
+        config_bundle_revision_uuid=BUNDLE_UUID,
+    )
+
+    assert snapshot["schema_version"] == 2
+    assert snapshot["config_bundle_revision_uuid"] == BUNDLE_UUID
+    assert validate_config_snapshot(snapshot) == snapshot
+
+
+def test_legacy_snapshot_remains_version_one_without_bundle_identity() -> None:
+    snapshot = build_config_snapshot({})
+
+    assert snapshot["schema_version"] == 1
+    assert "config_bundle_revision_uuid" not in snapshot
+    assert validate_config_snapshot(snapshot) == snapshot

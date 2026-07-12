@@ -20,7 +20,7 @@ PUBLIC_RUN_COLUMNS = """
 run_uuid, user_uuid, status::text as status, config_hash, config_revision_map,
 submitted_at, started_at, completed_at, published_at, jobs_considered, jobs_matched,
 error_code, public_error_message, is_current_result, source_connector_run_uuid,
-is_bootstrap_run, trigger_type, bootstrap_uuid
+is_bootstrap_run, trigger_type, bootstrap_uuid, config_bundle_revision_uuid
 """
 
 
@@ -59,8 +59,9 @@ class PipelineRunRepository:
                     f"""
                     insert into public.user_pipeline_runs (
                         user_uuid, status, config_snapshot, config_hash, config_revision_map,
-                        source_connector_run_uuid, is_bootstrap_run, trigger_type, bootstrap_uuid
-                    ) values (%s, %s::public.pipeline_status, %s, %s, %s, %s, %s, %s, %s)
+                        source_connector_run_uuid, is_bootstrap_run, trigger_type, bootstrap_uuid,
+                        config_bundle_revision_uuid
+                    ) values (%s, %s::public.pipeline_status, %s, %s, %s, %s, %s, %s, %s, %s)
                     returning {PUBLIC_RUN_COLUMNS}
                     """,
                     [
@@ -73,6 +74,7 @@ class PipelineRunRepository:
                         is_bootstrap_run,
                         trigger_type,
                         str(bootstrap_uuid) if bootstrap_uuid else None,
+                        snapshot.get("config_bundle_revision_uuid"),
                     ],
                 ).fetchone()
             except Exception as exc:
@@ -174,7 +176,8 @@ class PipelineRunRepository:
                 where run_uuid = %s and status = 'queued'
                 returning run_uuid, user_uuid, config_snapshot, config_hash, config_revision_map,
                           submitted_at, started_at, worker_id, source_connector_run_uuid,
-                          is_bootstrap_run, trigger_type, bootstrap_uuid
+                          is_bootstrap_run, trigger_type, bootstrap_uuid,
+                          config_bundle_revision_uuid
                 """,
                 [worker_id, row["run_uuid"]],
             ).fetchone()
