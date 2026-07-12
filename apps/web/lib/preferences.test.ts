@@ -22,6 +22,7 @@ describe("settings structure", () => {
   it("keeps the task-oriented sections in product order", () => {
     expect(SETTINGS_SECTION_ORDER).toEqual([
       "settings-overview",
+      "account-security",
       "shared-data-freshness",
       "personal-match-refresh",
       "search-preferences",

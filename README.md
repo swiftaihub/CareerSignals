@@ -81,11 +81,15 @@ The frontend environment is deliberately small:
 ```dotenv
 # Server-only; it is never sent to browser JavaScript.
 API_BASE_URL=http://localhost:8000
+PASSWORD_RECOVERY_COOKIE_SECRET=
 
 # Supabase project metadata safe for the browser.
+NEXT_PUBLIC_SITE_URL=http://localhost:3000
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 ```
+
+Generate a unique `PASSWORD_RECOVERY_COOKIE_SECRET` of at least 32 bytes for each environment. Password recovery also requires the matching `/auth/callback` URL to be allowed in Supabase; see [Supabase password management configuration](docs/supabase-password-management.md).
 
 Never add `NEXT_PUBLIC_` to `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`, `MOTHERDUCK_TOKEN`, `DEMO_SESSION_SECRET`, Connector credentials, or any other secret. The browser calls the same-origin Next.js BFF, which attaches the verified server-side session when forwarding allowlisted application requests to FastAPI.
 
@@ -317,6 +321,13 @@ dbt compile --profiles-dir .
 dbt build --selector shared_refresh --profiles-dir .
 dbt build --selector user_refresh --profiles-dir . \
   --vars '{"user_uuid":"TEST_UUID","run_uuid":"TEST_RUN_UUID"}'
+```
+
+
+docker:
+
+```bash
+docker compose up -d --force-recreate api worker scheduler
 ```
 
 RLS and two-user tests require real Supabase test credentials from the non-committed `.env`. Skipped integration tests are not equivalent to a pass; inspect the Pytest skip report.

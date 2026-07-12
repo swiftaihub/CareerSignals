@@ -7,7 +7,15 @@ import { demoAction, loginAction, type AuthActionState } from "@/app/(auth)/acti
 
 const initialState: AuthActionState = {};
 
-export function LoginForm({ nextPath, initialError }: { nextPath?: string; initialError?: string }) {
+export function LoginForm({
+  nextPath,
+  initialError,
+  initialSuccess
+}: {
+  nextPath?: string;
+  initialError?: string;
+  initialSuccess?: string;
+}) {
   const [state, action, pending] = useActionState(loginAction, initialState);
   const error = state.error || initialError;
 
@@ -19,17 +27,29 @@ export function LoginForm({ nextPath, initialError }: { nextPath?: string; initi
           {state.errorCode ? <div className="mt-1 text-xs font-semibold">{state.errorCode}</div> : null}
         </div>
       ) : null}
+      {initialSuccess ? (
+        <div
+          aria-live="polite"
+          className="fixed bottom-5 left-5 right-5 z-[60] max-w-md rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-950 shadow-2xl sm:left-auto"
+          role="status"
+        >
+          {initialSuccess}
+        </div>
+      ) : null}
       <form action={action} className="space-y-4">
         <input type="hidden" name="next" value={nextPath || "/dashboard"} />
         <label className="block text-sm font-semibold">
           Username or email
           <input className="input mt-1" autoComplete="username" name="identifier" required />
         </label>
-        <label className="block text-sm font-semibold">
-          Password
-          <input className="input mt-1" autoComplete="current-password" name="password" type="password" />
+        <div>
+          <div className="flex items-center justify-between gap-3">
+            <label className="text-sm font-semibold" htmlFor="login-password">Password</label>
+            <Link className="text-xs font-semibold text-primary" href="/forgot-password">Forgot password?</Link>
+          </div>
+          <input className="input mt-1" autoComplete="current-password" id="login-password" name="password" type="password" />
           <span className="mt-1 block text-xs font-normal text-muted-foreground">Leave blank when signing in as demo.</span>
-        </label>
+        </div>
         <button className="btn btn-primary w-full" disabled={pending} type="submit">
           {pending ? "Signing in…" : "Sign in"}
         </button>
