@@ -1,7 +1,7 @@
 # Database migrations and rollback
 
 CareerSignals uses an ordered, forward-only Supabase migration stack in
-`supabase/migrations`. The eleven files must be applied in numeric order. They
+`supabase/migrations`. The fourteen files must be applied in numeric order. They
 create the PostgreSQL control plane, serving tables, helper functions, RLS,
 constraints, and indexes. No migration or seed contains credentials.
 
@@ -32,11 +32,14 @@ audited backend service operations.
 
 - `auth.users.id` maps to a stable `user_profiles.user_uuid`; clients never
   choose their tenant UUID.
-- Only one queued/running pipeline and one current result run may exist per
-  user.
-- Current result rows must reference that user's current result run.
-- Publication must mark old result rows non-current before unpublishing the old
-  run, then publish the new run and rows in one transaction.
+- Only one queued/running pipeline and one latest successful result run may
+  exist per user.
+- Current personal rows must reference a running or completed run for that
+  same user. They do not have to reference the latest successful run because
+  incremental refreshes preserve unaffected current rows from older runs.
+- Publication must merge touched business keys and explicit stale decisions in
+  one transaction. It must not clear all current rows for a user just because a
+  new run completed.
 - Configuration history, entitlement events, pipeline events, and Admin audit
   logs are append-only.
 - RLS is enabled and forced on every application/control-plane table.

@@ -233,67 +233,6 @@ class UserResultsPublisher:
                     [user_key, run_key],
                 )
 
-            for row in match_rows:
-                connection.execute(
-                    """
-                    insert into public.user_job_matches (
-                      user_uuid, job_id, run_uuid, category_name, match_score,
-                      title_score, required_skill_score, preferred_skill_score,
-                      industry_score, salary_score, work_arrangement_score, visa_score,
-                      matched_skills, missing_skills, ranking_reasons, is_top_match, is_current
-                    ) values (
-                      %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                      %s, %s, %s, %s, false
-                    )
-                    """,
-                    [
-                        user_key,
-                        row["job_id"],
-                        run_key,
-                        row.get("category_name"),
-                        row.get("match_score", 0),
-                        row.get("title_score"),
-                        row.get("required_skill_score"),
-                        row.get("preferred_skill_score"),
-                        row.get("industry_score"),
-                        row.get("salary_score"),
-                        row.get("work_arrangement_score"),
-                        row.get("visa_score"),
-                        Jsonb(row.get("matched_skills") or []),
-                        Jsonb(row.get("missing_skills") or []),
-                        Jsonb(row.get("ranking_reasons") or []),
-                        bool(row.get("is_top_match")),
-                    ],
-                )
-
-            summary_specs = (
-                ("user_category_summary", "category_name", category_rows),
-                ("user_skill_gap", "canonical_skill", skill_rows),
-                ("user_company_priority", "company_name", company_rows),
-            )
-            for table, natural_key, rows in summary_specs:
-                for row in rows:
-                    connection.execute(
-                        f"""
-                        insert into public.{table} (
-                            user_uuid, run_uuid, {natural_key}, metrics, is_current
-                        ) values (%s, %s, %s, %s, false)
-                        """,
-                        [user_key, run_key, row[natural_key], Jsonb(row.get("metrics") or row)],
-                    )
-
-            # The current-version switch and run/profile completion are one transaction.
-            result_tables = (
-                "user_job_matches",
-                "user_category_summary",
-                "user_skill_gap",
-                "user_company_priority",
-            )
-            for table in result_tables:
-                connection.execute(
-                    f"update public.{table} set is_current = false where user_uuid = %s and is_current = true",
-                    [user_key],
-                )
             connection.execute(
                 """
                 update public.user_pipeline_runs
@@ -312,11 +251,184 @@ class UserResultsPublisher:
                 """,
                 [jobs_considered, len(match_rows), run_key],
             )
-            for table in result_tables:
+
+            for row in match_rows:
                 connection.execute(
-                    f"update public.{table} set is_current = true where user_uuid = %s and run_uuid = %s",
-                    [user_key, run_key],
+                    """
+                    update public.user_job_matches
+                    set is_current = false,
+                        deactivated_at = coalesce(deactivated_at, now()),
+                        deactivation_reason = 'superseded_by_personal_refresh',
+                        deactivated_run_uuid = %s,
+                        last_updated_run_uuid = %s,
+                        updated_at = now()
+                    where user_uuid = %s
+                      and job_id = %s
+                      and is_current = true
+                    """,
+                    [run_key, run_key, user_key, row["job_id"]],
                 )
+                connection.execute(
+                    """
+                    insert into public.user_job_matches (
+                      user_uuid, job_id, run_uuid, category_name, match_score,
+                      title_score, required_skill_score, preferred_skill_score,
+                      industry_score, salary_score, work_arrangement_score, visa_score,
+                      matched_skills, missing_skills, ranking_reasons, is_top_match,
+                      first_created_run_uuid, last_updated_run_uuid,
+                      last_evaluated_run_uuid, is_current
+                    ) values (
+                      %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                      %s, %s, %s, %s,
+                      coalesce(
+                        (
+                          select coalesce(first_created_run_uuid, run_uuid)
+                          from public.user_job_matches
+                          where user_uuid = %s and job_id = %s
+                          order by created_at asc
+                          limit 1
+                        ),
+                        %s
+                      ),
+                      %s, %s, true
+                    )
+                    on conflict (user_uuid, job_id, run_uuid) do update set
+                      category_name = excluded.category_name,
+                      match_score = excluded.match_score,
+                      title_score = excluded.title_score,
+                      required_skill_score = excluded.required_skill_score,
+                      preferred_skill_score = excluded.preferred_skill_score,
+                      industry_score = excluded.industry_score,
+                      salary_score = excluded.salary_score,
+                      work_arrangement_score = excluded.work_arrangement_score,
+                      visa_score = excluded.visa_score,
+                      matched_skills = excluded.matched_skills,
+                      missing_skills = excluded.missing_skills,
+                      ranking_reasons = excluded.ranking_reasons,
+                      is_top_match = excluded.is_top_match,
+                      first_created_run_uuid = coalesce(
+                        public.user_job_matches.first_created_run_uuid,
+                        excluded.first_created_run_uuid
+                      ),
+                      last_updated_run_uuid = excluded.last_updated_run_uuid,
+                      last_evaluated_run_uuid = excluded.last_evaluated_run_uuid,
+                      is_current = true,
+                      deactivated_at = null,
+                      deactivation_reason = null,
+                      deactivated_run_uuid = null,
+                      updated_at = now()
+                    """,
+                    [
+                        user_key,
+                        row["job_id"],
+                        run_key,
+                        row.get("category_name"),
+                        row.get("match_score", 0),
+                        row.get("title_score"),
+                        row.get("required_skill_score"),
+                        row.get("preferred_skill_score"),
+                        row.get("industry_score"),
+                        row.get("salary_score"),
+                        row.get("work_arrangement_score"),
+                        row.get("visa_score"),
+                        Jsonb(row.get("matched_skills") or []),
+                        Jsonb(row.get("missing_skills") or []),
+                        Jsonb(row.get("ranking_reasons") or []),
+                        bool(row.get("is_top_match")),
+                        user_key,
+                        row["job_id"],
+                        run_key,
+                        run_key,
+                        run_key,
+                    ],
+                )
+
+            summary_specs = (
+                ("user_category_summary", "category_name", category_rows),
+                ("user_skill_gap", "canonical_skill", skill_rows),
+                ("user_company_priority", "company_name", company_rows),
+            )
+            for table, natural_key, rows in summary_specs:
+                for row in rows:
+                    connection.execute(
+                        f"""
+                        update public.{table}
+                        set is_current = false,
+                            deactivated_at = coalesce(deactivated_at, now()),
+                            deactivation_reason = 'superseded_by_personal_refresh',
+                            deactivated_run_uuid = %s,
+                            last_updated_run_uuid = %s,
+                            updated_at = now()
+                        where user_uuid = %s
+                          and {natural_key} = %s
+                          and is_current = true
+                        """,
+                        [run_key, run_key, user_key, row[natural_key]],
+                    )
+                    connection.execute(
+                        f"""
+                        insert into public.{table} (
+                            user_uuid, run_uuid, {natural_key}, metrics,
+                            first_created_run_uuid, last_updated_run_uuid,
+                            last_evaluated_run_uuid, is_current
+                        ) values (
+                            %s, %s, %s, %s,
+                            coalesce(
+                              (
+                                select coalesce(first_created_run_uuid, run_uuid)
+                                from public.{table}
+                                where user_uuid = %s and {natural_key} = %s
+                                order by created_at asc
+                                limit 1
+                              ),
+                              %s
+                            ),
+                            %s, %s, true
+                        )
+                        on conflict (user_uuid, run_uuid, {natural_key}) do update set
+                            metrics = excluded.metrics,
+                            first_created_run_uuid = coalesce(
+                              public.{table}.first_created_run_uuid,
+                              excluded.first_created_run_uuid
+                            ),
+                            last_updated_run_uuid = excluded.last_updated_run_uuid,
+                            last_evaluated_run_uuid = excluded.last_evaluated_run_uuid,
+                            is_current = true,
+                            deactivated_at = null,
+                            deactivation_reason = null,
+                            deactivated_run_uuid = null,
+                            updated_at = now()
+                        """,
+                        [
+                            user_key,
+                            run_key,
+                            row[natural_key],
+                            Jsonb(row.get("metrics") or row),
+                            user_key,
+                            row[natural_key],
+                            run_key,
+                            run_key,
+                            run_key,
+                        ],
+                    )
+
+            connection.execute(
+                """
+                update public.user_job_matches as matches
+                set is_current = false,
+                    deactivated_at = coalesce(matches.deactivated_at, now()),
+                    deactivation_reason = 'shared_job_inactive',
+                    deactivated_run_uuid = %s,
+                    last_updated_run_uuid = %s,
+                    updated_at = now()
+                from public.job_postings as jobs
+                where matches.user_uuid = %s
+                  and matches.job_id = jobs.job_id
+                  and matches.is_current = true
+                  and jobs.is_active = false
+                """,
+                [run_key, run_key, user_key],
+            )
             connection.execute(
                 """
                 update public.user_profiles

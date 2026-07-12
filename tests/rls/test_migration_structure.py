@@ -17,6 +17,7 @@ EXPECTED_MIGRATIONS = [
     "0011_indexes_and_constraints.sql",
     "0012_pipeline_waiting_status.sql",
     "0013_global_bootstrap_pipeline.sql",
+    "0014_cumulative_personal_results.sql",
 ]
 
 RLS_TABLES = {
@@ -67,7 +68,7 @@ def test_rls_is_enabled_and_forced_for_every_table() -> None:
 
 
 def test_security_and_trigger_functions_fix_search_path() -> None:
-    functions_sql = _sql("0009_functions_and_triggers.sql")
+    functions_sql = "\n".join(_sql(name) for name in EXPECTED_MIGRATIONS)
     function_blocks = re.findall(
         r"create or replace function\s+public\.[\s\S]+?\$function\$;",
         functions_sql,
@@ -84,6 +85,25 @@ def test_tenant_and_publication_uniqueness_guards_exist() -> None:
     assert "create unique index user_job_matches_one_current_job" in constraint_sql
     assert "where status in ('queued', 'running')" in constraint_sql
     assert "where status in ('queued', 'waiting_for_global', 'running')" in _sql("0013_global_bootstrap_pipeline.sql")
+
+
+def test_cumulative_personal_result_lineage_is_migrated() -> None:
+    migration = _sql("0014_cumulative_personal_results.sql")
+    for table in (
+        "user_job_matches",
+        "user_category_summary",
+        "user_skill_gap",
+        "user_company_priority",
+    ):
+        assert f"alter table public.{table}" in migration
+        assert "first_created_run_uuid" in migration
+        assert "last_updated_run_uuid" in migration
+        assert "last_evaluated_run_uuid" in migration
+        assert "deactivation_reason" in migration
+        assert "deactivated_run_uuid" in migration
+
+    assert "upr.status in ('running', 'completed')" in migration
+    assert "does not require the latest-result run" in migration
 
 
 def test_demo_seed_is_fixed_read_only_and_has_exactly_twenty_jobs() -> None:

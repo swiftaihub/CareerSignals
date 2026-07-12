@@ -106,7 +106,7 @@ supabase db push --dry-run
 supabase db push
 ```
 
-The eleven files in `supabase/migrations/` must remain in numeric order. Validate them in a disposable project before applying them to a shared environment. Supabase CLI state under `supabase/.temp/` is intentionally ignored; reconstruct a link with `supabase link` rather than committing project metadata.
+The fourteen files in `supabase/migrations/` must remain in numeric order. Validate them in a disposable project before applying them to a shared environment. Supabase CLI state under `supabase/.temp/` is intentionally ignored; reconstruct a link with `supabase link` rather than committing project metadata.
 
 Bootstrap the first Admin only after migrations have been applied:
 
