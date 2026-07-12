@@ -4,14 +4,35 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
-import { DEMO_TOKEN_COOKIE } from "@/lib/auth";
+import { DEMO_TOKEN_COOKIE, getCurrentUser } from "@/lib/auth";
 import { backendFetch, readBackendError } from "@/lib/backend";
 import { safeRedirectPath } from "@/lib/navigation";
-import { createClient } from "@/lib/supabase/server";
+import {
+  requestPasswordReset,
+  updateAuthenticatedPassword,
+  updateRecoveryPassword
+} from "@/lib/password-management";
+import {
+  changePasswordSchema,
+  DEMO_PASSWORD_CHANGE_MESSAGE,
+  passwordSchema,
+  resetPasswordSchema,
+  resetRequestSchema
+} from "@/lib/password-policy";
+import { trustedSiteOrigin, RECOVERY_INTENT_COOKIE_NAME } from "@/lib/password-recovery";
+import {
+  clearRecoveryCookies,
+  getRecoveryIntentSecret,
+  readRecoverySession
+} from "@/lib/password-recovery-server";
+import { createWritableRecoveryClient } from "@/lib/supabase/recovery-server";
+import { createWritableClient as createClient } from "@/lib/supabase/server";
 
 export interface AuthActionState {
   error?: string;
   errorCode?: string;
+  success?: string;
+  cooldownUntil?: number;
 }
 
 const loginSchema = z.object({
@@ -22,7 +43,7 @@ const loginSchema = z.object({
 const registerSchema = z.object({
   username: z.string().trim().min(3).max(32).regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{2,31}$/, "Start with a letter or number; then use letters, numbers, dots, dashes, or underscores."),
   email: z.email(),
-  password: z.string().min(10, "Password must be at least 10 characters.")
+  password: passwordSchema
 });
 
 async function createDemoSession() {
@@ -38,6 +59,9 @@ async function createDemoSession() {
     // so an existing authenticated cookie cannot shadow the signed Demo identity.
     const supabase = await createClient();
     await supabase.auth.signOut({ scope: "local" });
+    const recoveryClient = await createWritableRecoveryClient();
+    await recoveryClient.auth.signOut({ scope: "local" });
+    await clearRecoveryCookies();
   } catch {
     // Demo authentication is issued and verified by FastAPI, independently of Supabase.
   }
@@ -133,6 +157,210 @@ export async function registerAction(_state: AuthActionState, formData: FormData
   redirect("/pending?registered=1");
 }
 
+export async function forgotPasswordAction(
+  _state: AuthActionState,
+  formData: FormData
+): Promise<AuthActionState> {
+  const parsed = resetRequestSchema.safeParse({ email: formData.get("email") });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message || "Enter a valid email address." };
+  }
+
+  let siteOrigin: string;
+  try {
+    siteOrigin = trustedSiteOrigin(
+      process.env.NEXT_PUBLIC_SITE_URL,
+      process.env.NODE_ENV
+    );
+  } catch {
+    return { error: "Password recovery is temporarily unavailable." };
+  }
+
+  if (!getRecoveryIntentSecret()) {
+    return { error: "Password recovery is temporarily unavailable." };
+  }
+
+  let recoveryClient: Awaited<ReturnType<typeof createWritableRecoveryClient>>;
+  try {
+    recoveryClient = await createWritableRecoveryClient();
+  } catch {
+    return { error: "Password recovery is temporarily unavailable." };
+  }
+  try {
+    await recoveryClient.auth.signOut({ scope: "local" });
+  } catch {
+    // Stale isolated state is also removed explicitly below.
+  }
+  await clearRecoveryCookies();
+
+  const callbackUrl = new URL("/auth/callback", siteOrigin);
+  callbackUrl.searchParams.set("next", "/reset-password");
+  const result = await requestPasswordReset({
+    email: parsed.data.email,
+    redirectTo: callbackUrl.toString(),
+    send: (email, options) => recoveryClient.auth.resetPasswordForEmail(email, options)
+  });
+  return result.success
+    ? { ...result, cooldownUntil: Date.now() + 30_000 }
+    : result;
+}
+
+export async function resetPasswordAction(
+  _state: AuthActionState,
+  formData: FormData
+): Promise<AuthActionState> {
+  const parsed = resetPasswordSchema.safeParse({
+    newPassword: formData.get("newPassword"),
+    confirmPassword: formData.get("confirmPassword")
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message || "Check your new password." };
+  }
+
+  let recoveryClient: Awaited<ReturnType<typeof createWritableRecoveryClient>>;
+  try {
+    recoveryClient = await createWritableRecoveryClient();
+  } catch {
+    return {
+      error: "This password reset session is unavailable. Request a new reset email."
+    };
+  }
+  const recoveryState = await readRecoverySession(recoveryClient);
+  if (!recoveryState.valid) {
+    try {
+      await recoveryClient.auth.signOut({ scope: "local" });
+    } catch {
+      // Explicit cookie cleanup below is the final local guard.
+    }
+    await clearRecoveryCookies();
+    return {
+      error: "This password reset link is invalid or has expired. Request a new reset email."
+    };
+  }
+
+  const result = await updateRecoveryPassword(parsed.data.newPassword, {
+    update: (attributes) => recoveryClient.auth.updateUser(attributes),
+    signOutGlobally: async () => {
+      const { error } = await recoveryClient.auth.signOut({ scope: "global" });
+      if (error) throw error;
+    },
+    clearLocalState: clearRecoveryCookies
+  });
+  if (result.error) {
+    if (result.error.includes("invalid or has expired")) {
+      await clearRecoveryCookies();
+    }
+    return result;
+  }
+
+  await clearRecoveryCookies();
+  const cookieStore = await cookies();
+  cookieStore.delete(DEMO_TOKEN_COOKIE);
+  cookieStore.delete(RECOVERY_INTENT_COOKIE_NAME);
+  try {
+    const normalClient = await createClient();
+    await normalClient.auth.signOut({ scope: "local" });
+  } catch {
+    // The isolated recovery credentials are already cleared. This only removes
+    // a pre-existing ordinary session from the current browser when present.
+  }
+  redirect("/login?password_reset=success");
+}
+
+export async function cancelPasswordRecoveryAction() {
+  try {
+    const recoveryClient = await createWritableRecoveryClient();
+    await recoveryClient.auth.signOut({ scope: "local" });
+  } catch {
+    // Continue with explicit cookie cleanup.
+  }
+  await clearRecoveryCookies();
+  const cookieStore = await cookies();
+  cookieStore.delete(DEMO_TOKEN_COOKIE);
+  try {
+    const normalClient = await createClient();
+    await normalClient.auth.signOut({ scope: "local" });
+  } catch {
+    // Returning to sign in must still work when Supabase is unavailable.
+  }
+  redirect("/login");
+}
+
+export async function changePasswordAction(
+  _state: AuthActionState,
+  formData: FormData
+): Promise<AuthActionState> {
+  const parsed = changePasswordSchema.safeParse({
+    currentPassword: formData.get("currentPassword"),
+    newPassword: formData.get("newPassword"),
+    confirmPassword: formData.get("confirmPassword")
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message || "Check your password details." };
+  }
+
+  const cookieStore = await cookies();
+  if (cookieStore.has(DEMO_TOKEN_COOKIE)) {
+    return { error: DEMO_PASSWORD_CHANGE_MESSAGE };
+  }
+  if (cookieStore.has(RECOVERY_INTENT_COOKIE_NAME)) {
+    return { error: "Finish or cancel password recovery before changing your password." };
+  }
+
+  let account: Awaited<ReturnType<typeof getCurrentUser>>;
+  try {
+    account = await getCurrentUser();
+  } catch {
+    return { error: "Password changes are temporarily unavailable." };
+  }
+  if (!account) return { error: "Your session has expired. Please sign in again." };
+  if (account.is_demo) return { error: DEMO_PASSWORD_CHANGE_MESSAGE };
+  if (account.account_status !== "active") {
+    return { error: "Password changes are available only for active accounts." };
+  }
+
+  let supabase: Awaited<ReturnType<typeof createClient>>;
+  try {
+    supabase = await createClient();
+  } catch {
+    return { error: "Password changes are temporarily unavailable." };
+  }
+  const {
+    data: { user },
+    error: userError
+  } = await supabase.auth.getUser();
+  if (userError || !user) {
+    return { error: "Your session has expired. Please sign in again." };
+  }
+
+  const result = await updateAuthenticatedPassword(
+    parsed.data.currentPassword,
+    parsed.data.newPassword,
+    {
+      update: (attributes) => supabase.auth.updateUser(attributes),
+      signOutGlobally: async () => {
+        const { error } = await supabase.auth.signOut({ scope: "global" });
+        if (error) throw error;
+      },
+      clearLocalState: clearRecoveryCookies,
+      isDemo: account.is_demo
+    }
+  );
+  if (!result.success) return result;
+
+  try {
+    // Guarantee that this browser loses its ordinary session even if remote
+    // global revocation returned an error after the password was updated.
+    await supabase.auth.signOut({ scope: "local" });
+  } catch {
+    // The server-side auth cookie adapter normally clears local state as part
+    // of global sign-out; recovery/demo cookies are still removed explicitly.
+  }
+  cookieStore.delete(DEMO_TOKEN_COOKIE);
+  await clearRecoveryCookies();
+  redirect("/login?password_changed=success");
+}
+
 export async function demoAction() {
   const result = await createDemoSession();
   if (result.error) {
@@ -144,6 +372,15 @@ export async function demoAction() {
 export async function logoutAction() {
   const supabase = await createClient();
   await supabase.auth.signOut();
-  (await cookies()).delete(DEMO_TOKEN_COOKIE);
+  try {
+    const recoveryClient = await createWritableRecoveryClient();
+    await recoveryClient.auth.signOut({ scope: "local" });
+  } catch {
+    // Explicit cookie cleanup below still removes local recovery state.
+  }
+  await clearRecoveryCookies();
+  const cookieStore = await cookies();
+  cookieStore.delete(DEMO_TOKEN_COOKIE);
+  cookieStore.delete(RECOVERY_INTENT_COOKIE_NAME);
   redirect("/");
 }

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useActionState } from "react";
 
 import { registerAction, type AuthActionState } from "@/app/(auth)/actions";
+import { PASSWORD_MIN_LENGTH } from "@/lib/password-policy";
 
 export function RegisterForm() {
   const [state, action, pending] = useActionState(registerAction, {} as AuthActionState);
@@ -26,8 +27,8 @@ export function RegisterForm() {
         </label>
         <label className="block text-sm font-semibold">
           Password
-          <input className="input mt-1" autoComplete="new-password" minLength={10} name="password" required type="password" />
-          <span className="mt-1 block text-xs font-normal text-muted-foreground">Use at least 10 characters.</span>
+          <input className="input mt-1" autoComplete="new-password" minLength={PASSWORD_MIN_LENGTH} name="password" required type="password" />
+          <span className="mt-1 block text-xs font-normal text-muted-foreground">Use at least {PASSWORD_MIN_LENGTH} characters.</span>
         </label>
         <button className="btn btn-primary w-full" disabled={pending} type="submit">
           {pending ? "Creating account…" : "Create account"}
