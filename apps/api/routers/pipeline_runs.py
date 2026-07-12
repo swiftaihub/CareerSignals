@@ -8,10 +8,18 @@ from fastapi import APIRouter, Depends, Query, Request, Response, status
 from apps.api.config import limiter
 from apps.api.dependencies.models import APIError, CurrentUser
 from apps.api.dependencies.authorization import require_active_user
-from apps.api.dependencies.repositories import get_config_repository, get_pipeline_run_repository
+from apps.api.dependencies.repositories import (
+    get_bootstrap_repository,
+    get_config_repository,
+    get_connector_run_repository,
+    get_pipeline_run_repository,
+)
 from apps.api.schemas.pipeline import PipelineRunSubmission
+from packages.careersignal_core.repositories.bootstrap import BootstrapRepository
 from packages.careersignal_core.repositories.configs import ConfigRepository
+from packages.careersignal_core.repositories.connector_runs import ConnectorRunRepository
 from packages.careersignal_core.repositories.errors import (
+    ConflictError,
     InvalidStateTransitionError,
     PipelineAlreadyActiveError,
     PipelineDailyLimitError,
@@ -36,20 +44,53 @@ def submit_pipeline_run(
     current_user: CurrentUser = Depends(require_active_user),
     configs: ConfigRepository = Depends(get_config_repository),
     runs: PipelineRunRepository = Depends(get_pipeline_run_repository),
+    connector_runs: ConnectorRunRepository = Depends(get_connector_run_repository),
+    bootstrap: BootstrapRepository = Depends(get_bootstrap_repository),
     settings: AppSettings = Depends(get_settings),
 ) -> dict[str, Any]:
     current_user = _pipeline_user(current_user)
     snapshot = configs.snapshot(current_user.user_uuid)
     try:
+        if not bootstrap.is_completed(current_user.user_uuid):
+            created = bootstrap.start_or_get(
+                user_uuid=current_user.user_uuid,
+                snapshot=snapshot,
+                daily_limit=settings.user_pipeline_daily_limit,
+            )
+            return {
+                key: created.get(key)
+                for key in (
+                    "run_uuid",
+                    "status",
+                    "submitted_at",
+                    "config_hash",
+                    "source_connector_run_uuid",
+                    "is_bootstrap_run",
+                    "bootstrap_status",
+                )
+            }
+        latest_shared = connector_runs.latest_successful()
+        if latest_shared is None:
+            raise ConflictError("No successful shared data refresh is available yet")
         created = runs.create(
             user_uuid=current_user.user_uuid,
             snapshot=snapshot,
             daily_limit=settings.user_pipeline_daily_limit,
+            source_connector_run_uuid=latest_shared["connector_run_uuid"],
         )
         return {
-            key: created[key]
-            for key in ("run_uuid", "status", "submitted_at", "config_hash")
+            key: created.get(key)
+            for key in (
+                "run_uuid",
+                "status",
+                "submitted_at",
+                "config_hash",
+                "source_connector_run_uuid",
+                "is_bootstrap_run",
+            )
         }
+    except ConflictError as exc:
+        raise APIError(409, str(exc), exc.error_code) from exc
     except PipelineAlreadyActiveError as exc:
         raise APIError(409, "A pipeline run is already queued or running.", exc.error_code) from exc
     except PipelineDailyLimitError as exc:

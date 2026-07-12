@@ -19,7 +19,8 @@ from packages.careersignal_core.storage.postgres import PostgresStore
 PUBLIC_RUN_COLUMNS = """
 run_uuid, user_uuid, status::text as status, config_hash, config_revision_map,
 submitted_at, started_at, completed_at, published_at, jobs_considered, jobs_matched,
-error_code, public_error_message, is_current_result
+error_code, public_error_message, is_current_result, source_connector_run_uuid,
+is_bootstrap_run, trigger_type, bootstrap_uuid
 """
 
 
@@ -33,10 +34,16 @@ class PipelineRunRepository:
         user_uuid: UUID | str,
         snapshot: dict[str, Any],
         daily_limit: int | None,
+        status: str = "queued",
+        source_connector_run_uuid: UUID | str | None = None,
+        is_bootstrap_run: bool = False,
+        trigger_type: str = "user_manual",
+        bootstrap_uuid: UUID | str | None = None,
+        connection: Any | None = None,
     ) -> dict[str, Any]:
-        with self.store.transaction() as connection:
+        def _create(active_connection: Any) -> dict[str, Any]:
             if daily_limit is not None:
-                recent = connection.execute(
+                recent = active_connection.execute(
                     """
                     select count(*) as count
                     from public.user_pipeline_runs
@@ -48,33 +55,53 @@ class PipelineRunRepository:
                 if int(recent["count"]) >= daily_limit:
                     raise PipelineDailyLimitError("Daily pipeline limit reached")
             try:
-                row = connection.execute(
+                row = active_connection.execute(
                     f"""
                     insert into public.user_pipeline_runs (
-                        user_uuid, config_snapshot, config_hash, config_revision_map
-                    ) values (%s, %s, %s, %s)
+                        user_uuid, status, config_snapshot, config_hash, config_revision_map,
+                        source_connector_run_uuid, is_bootstrap_run, trigger_type, bootstrap_uuid
+                    ) values (%s, %s::public.pipeline_status, %s, %s, %s, %s, %s, %s, %s)
                     returning {PUBLIC_RUN_COLUMNS}
                     """,
                     [
                         str(user_uuid),
+                        status,
                         Jsonb(snapshot),
                         snapshot["config_hash"],
                         Jsonb(snapshot.get("config_revision_map", {})),
+                        str(source_connector_run_uuid) if source_connector_run_uuid else None,
+                        is_bootstrap_run,
+                        trigger_type,
+                        str(bootstrap_uuid) if bootstrap_uuid else None,
                     ],
                 ).fetchone()
             except Exception as exc:
                 if getattr(exc, "sqlstate", None) == "23505":
                     raise PipelineAlreadyActiveError("A pipeline run is already queued or running") from exc
                 raise
-            connection.execute(
+            active_connection.execute(
                 """
                 insert into public.user_pipeline_run_events (
                     run_uuid, user_uuid, event_level, event_type, message
-                ) values (%s, %s, 'info', 'queued', 'Pipeline run queued')
+                ) values (%s, %s, 'info', %s, %s)
                 """,
-                [row["run_uuid"], str(user_uuid)],
+                [
+                    row["run_uuid"],
+                    str(user_uuid),
+                    "waiting_for_global" if status == "waiting_for_global" else "queued",
+                    (
+                        "First refresh is waiting for the shared job dataset to refresh"
+                        if status == "waiting_for_global"
+                        else "Pipeline run queued"
+                    ),
+                ],
             )
-        return dict(row)
+            return dict(row)
+
+        if connection is not None:
+            return _create(connection)
+        with self.store.transaction() as transaction:
+            return _create(transaction)
 
     def list_for_user(self, user_uuid: UUID | str, *, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
         return self.store.fetch_all(
@@ -146,7 +173,8 @@ class PipelineRunRepository:
                 set status = 'running', started_at = now(), worker_id = %s
                 where run_uuid = %s and status = 'queued'
                 returning run_uuid, user_uuid, config_snapshot, config_hash, config_revision_map,
-                          submitted_at, started_at, worker_id
+                          submitted_at, started_at, worker_id, source_connector_run_uuid,
+                          is_bootstrap_run, trigger_type, bootstrap_uuid
                 """,
                 [worker_id, row["run_uuid"]],
             ).fetchone()
@@ -159,6 +187,36 @@ class PipelineRunRepository:
                 [claimed["run_uuid"], claimed["user_uuid"]],
             )
             return dict(claimed)
+
+    def queue_after_global(
+        self,
+        *,
+        run_uuid: UUID | str,
+        source_connector_run_uuid: UUID | str,
+    ) -> dict[str, Any]:
+        with self.store.transaction() as connection:
+            row = connection.execute(
+                f"""
+                update public.user_pipeline_runs
+                set status = 'queued',
+                    source_connector_run_uuid = %s
+                where run_uuid = %s and status = 'waiting_for_global'
+                returning {PUBLIC_RUN_COLUMNS}
+                """,
+                [str(source_connector_run_uuid), str(run_uuid)],
+            ).fetchone()
+            if row is None:
+                raise InvalidStateTransitionError("Only waiting bootstrap runs may be queued")
+            connection.execute(
+                """
+                insert into public.user_pipeline_run_events (
+                    run_uuid, user_uuid, event_level, event_type, message
+                ) values (%s, %s, 'info', 'global_refresh_completed',
+                          'Shared job dataset refreshed; personal dbt run queued')
+                """,
+                [str(run_uuid), row["user_uuid"]],
+            )
+            return dict(row)
 
     def add_event(
         self,

@@ -1,4 +1,4 @@
-"""Run the trusted platform Connector refresh process."""
+"""Run the trusted shared Connector refresh process."""
 
 from __future__ import annotations
 
@@ -16,7 +16,10 @@ from src.utils.logging import configure_logging
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Refresh the shared job universe from system-owned Connector configuration."
+        description=(
+            "Refresh the shared job universe. SaaS/PostgreSQL mode uses all active "
+            "non-Demo users' effective job configs for acquisition inputs."
+        )
     )
     parser.add_argument(
         "--connector-run-uuid",

@@ -21,6 +21,7 @@ def main() -> None:
     )
     parser.add_argument("--user-uuid", required=True)
     parser.add_argument("--run-uuid", required=True)
+    parser.add_argument("--connector-run-uuid", required=True)
     parser.add_argument(
         "--snapshot-json",
         required=True,
@@ -32,7 +33,12 @@ def main() -> None:
     if not isinstance(snapshot, dict):
         raise SystemExit("snapshot JSON must contain an object")
     configure_logging()
-    summary = run_user_dbt_refresh(args.user_uuid, args.run_uuid, snapshot)
+    summary = run_user_dbt_refresh(
+        args.user_uuid,
+        args.run_uuid,
+        snapshot,
+        source_connector_run_uuid=args.connector_run_uuid,
+    )
     print(json.dumps(summary, indent=2, default=str))
 
 

@@ -39,7 +39,9 @@ CAREERSIGNAL_ENVIRONMENT=production
 CAREERSIGNAL_DATA_MODE=postgres
 CORS_ORIGINS=https://app.example.com
 USER_PIPELINE_MAX_CONCURRENCY=1
-CONNECTOR_REFRESH_TIMEZONE=UTC
+CONNECTOR_REFRESH_CRON=0 7,16,21 * * *
+CONNECTOR_REFRESH_TIMEZONE=America/New_York
+CONNECTOR_REFRESH_TRIGGER_MODE=scheduled
 DEMO_USER_UUID=00000000-0000-4000-8000-000000000020
 ```
 
@@ -132,7 +134,7 @@ Alert on:
 - queued-run age, failed-run rate, and average user Pipeline duration
 - worker heartbeat and repeated lock failures
 - last successful shared refresh and source-level stale/partial status
-- scheduler missed runs
+- prerequisite shared-refresh failures and scheduler missed runs when cron mode is enabled
 - MotherDuck/dbt failures
 - PostgreSQL connections, storage, locks, and replication/backup health
 - unusual Admin mutation volume and audit-write failures
@@ -168,12 +170,12 @@ For an application-only regression, roll API/worker/scheduler/web back to the pr
 
 For a destructive or incompatible migration failure, stop all writers and restore the verified pre-migration backup into a new database/project. Validate it before changing production connection strings. Preserve the failed environment for investigation.
 
-For a bad shared refresh, stop the scheduler, preserve Connector run records, and restore or republish the last validated shared partition. For a failed user refresh, the publication transaction must already have preserved that user's prior current result; investigate the failed `run_uuid` without manually changing another user's rows.
+For a bad shared refresh, stop the worker and the scheduler if cron mode is enabled, preserve Connector run records, and restore or republish the last validated shared partition. For a failed user refresh, the publication transaction must already have preserved that user's prior current result; investigate the failed `run_uuid` without manually changing another user's rows.
 
 ## Scaling notes
 
 - PostgreSQL `FOR UPDATE SKIP LOCKED` supports multiple worker processes, while per-user/global advisory locks prevent duplicate work.
 - MotherDuck write concurrency is separately constrained. Increase `USER_PIPELINE_MAX_CONCURRENCY` only after load and failure testing.
-- Run one scheduler leader. Multiple uncoordinated scheduler processes can submit duplicate global refresh attempts even though the global lock prevents simultaneous execution.
+- Run one scheduler leader with `CONNECTOR_REFRESH_CRON=0 7,16,21 * * *` and `CONNECTOR_REFRESH_TIMEZONE=America/New_York`. The scheduler enqueues global refresh metadata; the worker performs scheduled, Admin, and first-user bootstrap refreshes through the same global lock and publication path.
 - Keep web and API clocks synchronized with UTC; format dates for locale only in the browser.
 - Use a CDN only for static Next.js assets. Do not publicly cache authenticated BFF or API responses.

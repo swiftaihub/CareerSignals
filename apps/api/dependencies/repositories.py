@@ -6,6 +6,7 @@ from apps.api.dependencies.auth import get_current_identity
 from apps.api.dependencies.authorization import CurrentUser, require_active_user
 from packages.careersignal_core.repositories.activity import ActivityRepository
 from packages.careersignal_core.repositories.admin import AdminRepository
+from packages.careersignal_core.repositories.bootstrap import BootstrapRepository
 from packages.careersignal_core.repositories.configs import ConfigRepository
 from packages.careersignal_core.repositories.connector_runs import ConnectorRunRepository
 from packages.careersignal_core.repositories.entitlements import EntitlementRepository
@@ -32,6 +33,10 @@ def get_pipeline_run_repository() -> PipelineRunRepository:
 
 def get_connector_run_repository() -> ConnectorRunRepository:
     return ConnectorRunRepository()
+
+
+def get_bootstrap_repository() -> BootstrapRepository:
+    return BootstrapRepository()
 
 
 def get_entitlement_repository() -> EntitlementRepository:

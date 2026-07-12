@@ -273,7 +273,7 @@ export interface PipelineRunMessage {
   message: string;
 }
 
-export type PipelineRunState = "queued" | "running" | "completed" | "failed" | "cancelled";
+export type PipelineRunState = "waiting_for_global" | "queued" | "running" | "completed" | "failed" | "cancelled";
 
 export interface PipelineRunStatus {
   run_id: string;
@@ -301,6 +301,11 @@ export interface UserPipelineRun {
   completed_at?: string | null;
   published_at?: string | null;
   config_hash?: string;
+  source_connector_run_uuid?: string | null;
+  is_bootstrap_run?: boolean;
+  bootstrap_uuid?: string | null;
+  bootstrap_status?: string | null;
+  trigger_type?: string | null;
   jobs_considered?: number;
   jobs_matched?: number;
   public_error_message?: string | null;
@@ -392,4 +397,23 @@ export interface AdminAuditList {
   total: number;
   page: number;
   page_size: number;
+}
+
+export interface AdminConnectorRun {
+  connector_run_uuid: string;
+  status: string;
+  trigger_type: string;
+  created_at: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  jobs_fetched?: number;
+  jobs_retained?: number;
+  jobs_published?: number;
+  included_user_count?: number;
+  acquisition_query_count?: number;
+  public_status_message?: string | null;
+}
+
+export interface AdminConnectorRunList {
+  items: AdminConnectorRun[];
 }

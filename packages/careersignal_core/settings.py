@@ -70,13 +70,16 @@ class AppSettings(BaseSettings):
     )
 
     connector_refresh_cron: str = Field(
-        default="0 */6 * * *", validation_alias="CONNECTOR_REFRESH_CRON"
+        default="0 7,16,21 * * *", validation_alias="CONNECTOR_REFRESH_CRON"
     )
     connector_refresh_timezone: str = Field(
-        default="UTC", validation_alias="CONNECTOR_REFRESH_TIMEZONE"
+        default="America/New_York", validation_alias="CONNECTOR_REFRESH_TIMEZONE"
     )
     connector_stale_after_hours: int = Field(
         default=8, ge=1, validation_alias="CONNECTOR_STALE_AFTER_HOURS"
+    )
+    connector_refresh_trigger_mode: Literal["scheduled", "first_user_bootstrap", "both"] = Field(
+        default="scheduled", validation_alias="CONNECTOR_REFRESH_TRIGGER_MODE"
     )
     scheduler_internal_secret: SecretStr = Field(
         default=SecretStr(""), validation_alias="SCHEDULER_INTERNAL_SECRET"

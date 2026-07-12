@@ -8,6 +8,7 @@ import threading
 import time
 from typing import Any, Callable
 
+from packages.careersignal_core.repositories.bootstrap import BootstrapRepository
 from packages.careersignal_core.repositories.pipeline_runs import PipelineRunRepository
 from packages.careersignal_core.settings import AppSettings, get_settings
 from packages.careersignal_core.tasks.claim import claim_next_user_pipeline_run
@@ -28,12 +29,14 @@ class UserPipelineWorker:
         locks: AdvisoryLockManager | None = None,
         settings: AppSettings | None = None,
         runner: Callable[..., dict[str, Any]] | None = None,
+        bootstrap_repository: BootstrapRepository | None = None,
         worker_id: str | None = None,
     ) -> None:
         self.repository = repository or PipelineRunRepository()
         self.locks = locks or AdvisoryLockManager()
         self.settings = settings or get_settings()
         self.runner = runner or self._default_runner
+        self.bootstrap_repository = bootstrap_repository or BootstrapRepository()
         self.worker_id = worker_id or worker_identity()
 
     @staticmethod
@@ -49,9 +52,18 @@ class UserPipelineWorker:
         if run is None:
             return False
         user_uuid, run_uuid = str(run["user_uuid"]), str(run["run_uuid"])
+        source_connector_run_uuid = run.get("source_connector_run_uuid")
+        bootstrap_uuid = run.get("bootstrap_uuid")
         try:
+            if not source_connector_run_uuid:
+                raise RuntimeError("Personal pipeline run is not bound to a successful shared refresh")
             with self.locks.acquire(f"careersignals:user:{user_uuid}", wait=False):
                 with self.locks.acquire_writer_slot(self.settings.user_pipeline_max_concurrency):
+                    if bootstrap_uuid:
+                        self.bootstrap_repository.mark_personal_running(
+                            bootstrap_uuid=bootstrap_uuid,
+                            run_uuid=run_uuid,
+                        )
                     self.repository.add_event(
                         run_uuid=run_uuid,
                         user_uuid=user_uuid,
@@ -62,6 +74,12 @@ class UserPipelineWorker:
                         user_uuid=user_uuid,
                         run_uuid=run_uuid,
                         config_snapshot=dict(run["config_snapshot"]),
+                        source_connector_run_uuid=str(source_connector_run_uuid),
+                    )
+                if bootstrap_uuid:
+                    self.bootstrap_repository.mark_personal_completed(
+                        bootstrap_uuid=bootstrap_uuid,
+                        run_uuid=run_uuid,
                     )
             return True
         except LockUnavailableError as exc:
@@ -78,6 +96,12 @@ class UserPipelineWorker:
                 public_message="The pipeline failed. Your previous results are still available.",
                 internal_message=f"{type(exc).__name__}: {exc}",
             )
+            if bootstrap_uuid:
+                self.bootstrap_repository.mark_personal_failed(
+                    bootstrap_uuid=bootstrap_uuid,
+                    run_uuid=run_uuid,
+                    internal_error_message=f"{type(exc).__name__}: {exc}",
+                )
         return True
 
     def run_forever(self, stop_event: threading.Event | None = None) -> None:

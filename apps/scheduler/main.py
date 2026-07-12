@@ -8,23 +8,24 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from packages.careersignal_core.settings import get_settings
-from packages.careersignal_core.tasks.connector_refresh_task import run_scheduled_connector_refresh
+from packages.careersignal_core.tasks.connector_refresh_task import enqueue_scheduled_connector_refresh
 
 
 def build_scheduler() -> BlockingScheduler:
     settings = get_settings()
     scheduler = BlockingScheduler(timezone=settings.connector_refresh_timezone)
-    scheduler.add_job(
-        run_scheduled_connector_refresh,
-        CronTrigger.from_crontab(
-            settings.connector_refresh_cron, timezone=settings.connector_refresh_timezone
-        ),
-        id="global-connector-refresh",
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=900,
-        replace_existing=True,
-    )
+    if settings.connector_refresh_trigger_mode in {"scheduled", "both"}:
+        scheduler.add_job(
+            enqueue_scheduled_connector_refresh,
+            CronTrigger.from_crontab(
+                settings.connector_refresh_cron, timezone=settings.connector_refresh_timezone
+            ),
+            id="global-connector-refresh",
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=900,
+            replace_existing=True,
+        )
     return scheduler
 
 

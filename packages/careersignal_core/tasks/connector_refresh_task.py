@@ -6,7 +6,9 @@ import logging
 from typing import Any, Callable
 
 from packages.careersignal_core.repositories.connector_runs import ConnectorRunRepository
+from packages.careersignal_core.repositories.errors import ConflictError
 from packages.careersignal_core.settings import AppSettings, get_settings
+from packages.careersignal_core.tasks.connector_refresh_worker import ConnectorRefreshWorker
 from packages.careersignal_core.tasks.locks import AdvisoryLockManager
 
 LOGGER = logging.getLogger(__name__)
@@ -31,47 +33,27 @@ def run_scheduled_connector_refresh(
     lock_manager = locks or AdvisoryLockManager()
     process_settings = settings or get_settings()
     run = repo.create(trigger_type=trigger_type)
-    run_uuid = str(run["connector_run_uuid"])
+    worker = ConnectorRefreshWorker(
+        repository=repo,
+        locks=lock_manager,
+        settings=process_settings,
+        runner=runner or _default_runner,
+    )
+    worker.process_one()
+    completed = repo.get(run["connector_run_uuid"]) or run
+    return {"connector_run_uuid": str(run["connector_run_uuid"]), **completed}
+
+
+def enqueue_scheduled_connector_refresh(
+    *,
+    repository: ConnectorRunRepository | None = None,
+    trigger_type: str = "scheduled",
+) -> dict[str, Any]:
+    """Create global refresh metadata for the worker without doing HTTP work."""
+
+    repo = repository or ConnectorRunRepository()
     try:
-        with lock_manager.acquire("careersignals:global-connector-refresh", wait=False):
-            with lock_manager.acquire_writer_slot(
-                process_settings.user_pipeline_max_concurrency
-            ):
-                repo.start(run_uuid)
-                result = (runner or _default_runner)(connector_run_uuid=run_uuid)
-            for source in result.get("source_results", []):
-                repo.upsert_source_result(
-                    connector_run_uuid=run_uuid,
-                    source_name=str(source["source_name"]),
-                    status=str(source["status"]),
-                    records_fetched=int(source.get("records_fetched", 0)),
-                    records_retained=int(source.get("records_retained", 0)),
-                    public_status_message=str(source.get("public_status_message", "")),
-                    internal_error_message=source.get("internal_error_message"),
-                )
-            repo.finish(
-                connector_run_uuid=run_uuid,
-                status=result.get("status", "completed"),
-                jobs_fetched=int(result.get("jobs_fetched", result.get("fetched_raw_jobs", 0))),
-                jobs_retained=int(result.get("jobs_retained", result.get("shared_jobs", 0))),
-                jobs_published=int(result.get("jobs_published", result.get("published_jobs", 0))),
-                shared_dbt_run_completed=bool(
-                    result.get("shared_dbt_run_completed", result.get("dbt_completed", False))
-                ),
-                public_status_message=str(result.get("public_status_message", "Updated successfully")),
-            )
-            return {"connector_run_uuid": run_uuid, **result}
-    except Exception as exc:
-        LOGGER.exception("Global connector refresh %s failed", run_uuid)
-        repo.finish(
-            connector_run_uuid=run_uuid,
-            status="failed",
-            jobs_fetched=0,
-            jobs_retained=0,
-            jobs_published=0,
-            shared_dbt_run_completed=False,
-            public_status_message="The scheduled refresh was not completed.",
-            error_code="CONNECTOR_REFRESH_FAILED",
-            internal_error_message=f"{type(exc).__name__}: {exc}",
-        )
-        raise
+        return repo.create_if_no_active(trigger_type=trigger_type)
+    except ConflictError:
+        LOGGER.info("A global connector refresh is already queued or running")
+        return {"status": "skipped", "reason": "global_refresh_already_active"}

@@ -65,6 +65,7 @@ from {{ ref('int_job_posts_deduped') }} as jobs
 cross join {{ ref('stg_user_job_preferences') }} as preferences
 where preferences.user_uuid = '{{ var("user_uuid") }}'
   and preferences.run_uuid = '{{ var("run_uuid") }}'
+  and jobs.connector_run_uuid = '{{ var("connector_run_uuid", "") }}'
   and (
       lower(jobs.category_name) = lower(preferences.category_name)
       or exists (

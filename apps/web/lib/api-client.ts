@@ -1,6 +1,8 @@
 import type {
   AdminActionResponse,
   AdminAuditList,
+  AdminConnectorRun,
+  AdminConnectorRunList,
   AdminMetrics,
   AdminUser,
   AdminUserList,
@@ -226,3 +228,7 @@ export const deleteAdminUser = (userUuid: string) =>
   apiRequest<void>(`/api/admin/users/${encodeURIComponent(userUuid)}`, { method: "DELETE" });
 export const getAdminAuditLogs = (filters: Record<string, unknown> = {}) =>
   apiRequest<AdminAuditList>(`/api/admin/audit-logs${paramsFrom(filters)}`);
+export const getAdminConnectorRuns = () =>
+  apiRequest<AdminConnectorRunList>("/api/admin/connector-runs");
+export const createAdminConnectorRun = () =>
+  apiRequest<AdminConnectorRun>("/api/admin/connector-runs", { method: "POST" });

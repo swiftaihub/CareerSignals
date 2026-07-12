@@ -23,6 +23,7 @@ from apps.api.dependencies.models import APIError
 from apps.api.dependencies.repositories import get_repository  # compatibility/test override seam
 from apps.api.routers import (
     admin_audit,
+    admin_connector_runs,
     admin_metrics,
     admin_users,
     auth,
@@ -147,6 +148,7 @@ def create_app() -> FastAPI:
     application.include_router(data_freshness.router)
     application.include_router(exports.router)
     application.include_router(admin_metrics.router)
+    application.include_router(admin_connector_runs.router)
     application.include_router(admin_users.router)
     application.include_router(admin_audit.router)
     application.include_router(deprecated.router)

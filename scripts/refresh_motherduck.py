@@ -63,7 +63,7 @@ def _print_summary(summary: dict[str, Any]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Deprecated name: run the shared system Connector refresh. "
+            "Deprecated name: run the trusted shared Connector refresh. "
             "This command never runs user models."
         )
     )

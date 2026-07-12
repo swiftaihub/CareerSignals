@@ -92,6 +92,7 @@ def run_shared_dbt_build(
 def run_user_dbt_build(
     user_uuid: str | UUID,
     run_uuid: str | UUID,
+    connector_run_uuid: str | UUID,
     project_dir: str | Path | None = None,
     profiles_dir: str | Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
@@ -99,8 +100,13 @@ def run_user_dbt_build(
 
     user = _validate_uuid(user_uuid, "user_uuid")
     run = _validate_uuid(run_uuid, "run_uuid")
+    connector_run = _validate_uuid(connector_run_uuid, "connector_run_uuid")
     variables = json.dumps(
-        {"user_uuid": user, "run_uuid": run},
+        {
+            "connector_run_uuid": connector_run,
+            "run_uuid": run,
+            "user_uuid": user,
+        },
         sort_keys=True,
         separators=(",", ":"),
     )

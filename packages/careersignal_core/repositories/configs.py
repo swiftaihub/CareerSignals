@@ -269,3 +269,49 @@ class ConfigRepository:
         if set(rows) != set(CONFIG_TYPES):
             raise NotFoundError("One or more user configuration documents are missing")
         return build_config_snapshot(rows)
+
+    def active_user_snapshots(self) -> list[dict[str, Any]]:
+        """Return effective config snapshots for every active non-Demo user."""
+
+        rows = self.store.fetch_all(
+            """
+            select p.user_uuid, d.config_type::text as config_type, d.override_json, d.revision
+            from public.user_profiles p
+            join public.user_config_documents d on d.user_uuid = p.user_uuid
+            where p.deleted_at is null
+              and p.account_status = 'active'
+              and p.role = 'user'
+              and p.expires_at > now()
+            order by p.created_at, p.user_uuid, d.config_type
+            """
+        )
+        grouped: dict[str, dict[str, dict[str, Any]]] = {}
+        for row in rows:
+            user_uuid = str(row["user_uuid"])
+            grouped.setdefault(user_uuid, {})[row["config_type"]] = {
+                "override_json": _dict(row.get("override_json")),
+                "revision": int(row.get("revision") or 1),
+            }
+
+        snapshots: list[dict[str, Any]] = []
+        for user_uuid, documents in grouped.items():
+            if set(documents) != set(CONFIG_TYPES):
+                raise NotFoundError(f"Configuration documents are missing for user {user_uuid}")
+            snapshots.append({"user_uuid": user_uuid, **build_config_snapshot(documents)})
+        return snapshots
+
+    def is_eligible_for_global_refresh(self, user_uuid: UUID | str) -> bool:
+        row = self.store.fetch_one(
+            """
+            select 1
+            from public.user_profiles
+            where user_uuid = %s
+              and deleted_at is null
+              and account_status = 'active'
+              and role = 'user'
+              and expires_at > now()
+            limit 1
+            """,
+            [str(user_uuid)],
+        )
+        return row is not None

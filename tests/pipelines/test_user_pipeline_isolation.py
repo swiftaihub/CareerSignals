@@ -9,6 +9,7 @@ from src.config.loader import build_config_snapshot
 
 USER_UUID = "11111111-1111-4111-8111-111111111111"
 RUN_UUID = "22222222-2222-4222-8222-222222222222"
+CONNECTOR_RUN_UUID = "33333333-3333-4333-8333-333333333333"
 
 
 def test_user_pipeline_modules_have_no_connector_imports() -> None:
@@ -60,7 +61,9 @@ def test_user_refresh_stages_and_builds_without_connector_calls(monkeypatch) -> 
     monkeypatch.setattr(
         module,
         "run_user_dbt_build",
-        lambda user_uuid, run_uuid: calls.append(f"dbt:{user_uuid}:{run_uuid}"),
+        lambda user_uuid, run_uuid, connector_run_uuid: calls.append(
+            f"dbt:{user_uuid}:{run_uuid}:{connector_run_uuid}"
+        ),
     )
     monkeypatch.setattr(
         module,
@@ -72,8 +75,9 @@ def test_user_refresh_stages_and_builds_without_connector_calls(monkeypatch) -> 
         USER_UUID,
         RUN_UUID,
         build_config_snapshot({}),
+        source_connector_run_uuid=CONNECTOR_RUN_UUID,
     )
 
-    assert calls == [f"dbt:{USER_UUID}:{RUN_UUID}"]
+    assert calls == [f"dbt:{USER_UUID}:{RUN_UUID}:{CONNECTOR_RUN_UUID}"]
     assert summary["dbt_completed"] is True
     assert summary["published"] is False

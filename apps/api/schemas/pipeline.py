@@ -12,6 +12,9 @@ class PipelineRunSubmission(APIModel):
     status: str
     submitted_at: datetime
     config_hash: str
+    source_connector_run_uuid: UUID | None = None
+    is_bootstrap_run: bool = False
+    bootstrap_status: str | None = None
 
 
 class PipelineRunEvent(APIModel):
@@ -33,4 +36,8 @@ class PipelineRunResponse(APIModel):
     jobs_matched: int = 0
     error_code: str | None = None
     public_error_message: str | None = None
+    source_connector_run_uuid: UUID | None = None
+    is_bootstrap_run: bool = False
+    bootstrap_uuid: UUID | None = None
+    trigger_type: str | None = None
     events: list[PipelineRunEvent] = []

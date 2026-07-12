@@ -2,19 +2,24 @@
 
 CareerSignals is a hosted, multi-user job-search intelligence application. Supabase Auth and PostgreSQL form the SaaS control plane and serving layer, MotherDuck and dbt perform analytics, FastAPI enforces tenant and account policy, and Next.js serves the public, authenticated, Demo, and Admin experiences.
 
-The central safety rule is that shared job acquisition and personal matching are separate pipelines:
+The central safety rule is that shared job acquisition and personal matching are separate stages with separate ownership:
 
 ```text
-Scheduled shared refresh                 User-requested personal refresh
-Scheduler                                Authenticated active user
-  -> external Connectors                   -> immutable config snapshot
-  -> shared MotherDuck raw/staging          -> queued PostgreSQL run
-  -> dbt selector: shared_refresh            -> dedicated worker
-  -> shared PostgreSQL job_postings          -> dbt selector: user_refresh
-                                              -> atomic user-only publication
+User-requested personal refresh
+Authenticated active user
+  -> immutable config snapshot
+  -> queued PostgreSQL run
+  -> dedicated worker
+  -> global shared refresh from all active users' job configs
+     -> external Connectors
+     -> shared MotherDuck raw/staging
+     -> dbt selector: shared_refresh
+     -> shared PostgreSQL job_postings
+  -> dbt selector: user_refresh
+  -> atomic user-only publication
 ```
 
-Normal users cannot invoke Connectors, choose dbt selectors, submit a tenant UUID, or access another tenant's result partition. A personal refresh only filters, categorizes, and scores the existing shared job universe. The fixed Demo tenant has 20 curated jobs and is read-only.
+Normal users cannot invoke Connectors directly, choose dbt selectors, submit a tenant UUID, or access another tenant's result partition. A personal refresh first runs the system-owned shared refresh, then filters, categorizes, and scores the shared job universe. The fixed Demo tenant has 20 curated jobs and is read-only.
 
 ## Repository map
 
@@ -22,7 +27,7 @@ Normal users cannot invoke Connectors, choose dbt selectors, submit a tenant UUI
 apps/api/                         FastAPI application and authorization boundary
 apps/web/                         Next.js App Router frontend and authenticated BFF
 apps/worker/                      PostgreSQL queue worker for user dbt runs
-apps/scheduler/                   scheduled shared Connector refresh process
+apps/scheduler/                   optional cron trigger for shared Connector refresh
 config/                           repository defaults and platform Connector config
 data/demo/demo_jobs.json          fixed 20-job Demo fixture
 dbt/                              shared_refresh and user_refresh models/selectors
@@ -227,6 +232,7 @@ Admin:
 - `GET /api/admin/metrics`
 - paginated `/api/admin/users` lifecycle endpoints
 - `GET /api/admin/audit-logs`
+- `POST /api/admin/connector-runs` to enqueue an Admin-only global refresh
 
 The former user-facing `/api/pipeline/run`, `/api/dbt/run`, and `/api/dbt/test` operations are deprecated and return `410 Gone`. There is no public Connector refresh endpoint.
 
@@ -238,13 +244,27 @@ The former user-facing `/api/pipeline/run`, `/api/dbt/run`, and `/api/dbt/test` 
 repository default + user override = effective user configuration
 ```
 
-Each successful save creates an immutable revision. Restoring an older revision creates another revision; history is not rewritten. `config/platform_connector_config.yml` is system-owned and cannot be edited from Settings.
+Each successful save creates an immutable revision. Restoring an older revision creates another revision; history is not rewritten. `config/platform_connector_config.yml` remains system-owned for Connector sources, budgets, retry, freshness, and optional cron settings. Shared acquisition search categories and broad location filters are built from every active non-Demo user's effective `jobs_config`.
 
-Changing Job Preferences does not query external job APIs. Source data is refreshed on the platform schedule; the personal worker snapshots the effective configuration and runs only `user_refresh`.
+Changing Job Preferences does not query external job APIs in the request/response path. Updated acquisition fields are included in the next scheduled, Admin-triggered, or first-user bootstrap global refresh. The personal worker snapshots the effective configuration and then runs only the fixed `user_refresh` dbt selector for that user/run partition against a successful shared-data version.
 
 ## Pipeline operations
 
-Run a trusted shared refresh manually:
+The global pipeline is system-owned. It aggregates every eligible active production user's effective `jobs_config`, normalizes and deduplicates connector requests, runs external connectors, refreshes shared dbt models with `shared_refresh`, and publishes shared job data only after the full shared build succeeds. It is scheduled by the runtime environment:
+
+```env
+CONNECTOR_REFRESH_CRON=0 7,16,21 * * *
+CONNECTOR_REFRESH_TIMEZONE=America/New_York
+CONNECTOR_REFRESH_TRIGGER_MODE=scheduled
+```
+
+The scheduler enqueues metadata only; the worker claims global runs and uses the same lock/publication path for scheduled, Admin, and first-user bootstrap refreshes. Normal users do not receive a global refresh endpoint.
+
+The personal pipeline is user-owned. It never imports connector clients, never runs `shared_refresh`, never accepts a browser-supplied `user_uuid`, and never accepts a browser-supplied dbt selector. After a user's bootstrap is complete, `POST /api/pipeline-runs` snapshots that authenticated user's config, binds the run to the latest successfully published shared connector run, and queues only `user_refresh`.
+
+First-user bootstrap is server-orchestrated. The first personal request creates a durable bootstrap workflow, snapshots the user's current config, queues a `first_user_bootstrap` global refresh that includes that frozen acquisition config, waits for successful shared publication, binds the waiting personal run to that exact `connector_run_uuid`, and then runs the personal dbt-only refresh. Duplicate first clicks return the existing workflow instead of creating another global run.
+
+Run a trusted shared refresh manually. In SaaS/PostgreSQL mode, this uses all active non-Demo users' effective `jobs_config` inputs; otherwise it falls back to `config/platform_connector_config.yml` acquisition categories:
 
 ```bash
 python scripts/refresh_connectors.py
@@ -261,7 +281,7 @@ Development-only user selector example (use real UUID values and an existing sta
 
 ```bash
 dbt build --selector user_refresh --profiles-dir . \
-  --vars '{"user_uuid":"00000000-0000-4000-8000-000000000001","run_uuid":"00000000-0000-4000-8000-000000000002"}'
+  --vars '{"user_uuid":"00000000-0000-4000-8000-000000000001","run_uuid":"00000000-0000-4000-8000-000000000002","connector_run_uuid":"00000000-0000-4000-8000-000000000003"}'
 ```
 
 Never pass an arbitrary selector from a request, run a user refresh with `--full-refresh`, or delete an unqualified multi-user table. A failed user build/publication leaves the previous current result partition unchanged.

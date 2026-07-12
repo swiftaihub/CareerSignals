@@ -76,6 +76,6 @@ retry:
   backoff_seconds: 1
 
 schedule:
-  cron: "0 */6 * * *"
-  timezone: "UTC"
+  cron: "0 7,16,21 * * *"
+  timezone: "America/New_York"
   stale_after_hours: 8

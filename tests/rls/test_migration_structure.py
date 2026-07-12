@@ -15,6 +15,8 @@ EXPECTED_MIGRATIONS = [
     "0009_functions_and_triggers.sql",
     "0010_rls_policies.sql",
     "0011_indexes_and_constraints.sql",
+    "0012_pipeline_waiting_status.sql",
+    "0013_global_bootstrap_pipeline.sql",
 ]
 
 RLS_TABLES = {
@@ -25,8 +27,11 @@ RLS_TABLES = {
     "billing_events",
     "connector_refresh_runs",
     "connector_source_runs",
+    "connector_run_user_config_snapshots",
+    "connector_acquisition_queries",
     "user_pipeline_runs",
     "user_pipeline_run_events",
+    "user_bootstrap_workflows",
     "job_postings",
     "user_job_matches",
     "user_job_statuses",
@@ -53,7 +58,9 @@ def test_every_control_plane_table_is_created() -> None:
 
 
 def test_rls_is_enabled_and_forced_for_every_table() -> None:
-    rls_sql = _sql("0010_rls_policies.sql")
+    rls_sql = "\n".join(
+        _sql(name) for name in ("0010_rls_policies.sql", "0013_global_bootstrap_pipeline.sql")
+    )
     for table in RLS_TABLES:
         assert f"alter table public.{table} enable row level security" in rls_sql
         assert f"alter table public.{table} force row level security" in rls_sql
@@ -72,9 +79,11 @@ def test_security_and_trigger_functions_fix_search_path() -> None:
 def test_tenant_and_publication_uniqueness_guards_exist() -> None:
     constraint_sql = _sql("0011_indexes_and_constraints.sql")
     assert "create unique index one_active_pipeline_per_user" in constraint_sql
+    assert "create unique index one_active_bootstrap_workflow_per_user" in _sql("0013_global_bootstrap_pipeline.sql")
     assert "create unique index one_current_pipeline_result_per_user" in constraint_sql
     assert "create unique index user_job_matches_one_current_job" in constraint_sql
     assert "where status in ('queued', 'running')" in constraint_sql
+    assert "where status in ('queued', 'waiting_for_global', 'running')" in _sql("0013_global_bootstrap_pipeline.sql")
 
 
 def test_demo_seed_is_fixed_read_only_and_has_exactly_twenty_jobs() -> None:

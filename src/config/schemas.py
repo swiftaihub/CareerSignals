@@ -48,8 +48,8 @@ class ConnectorBudgetConfig(StrictConfigModel):
 
 
 class ConnectorScheduleConfig(StrictConfigModel):
-    cron: str = "0 */6 * * *"
-    timezone: str = "UTC"
+    cron: str = "0 7,16,21 * * *"
+    timezone: str = "America/New_York"
     stale_after_hours: int = Field(default=8, ge=1, le=24 * 30)
 
 

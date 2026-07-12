@@ -70,6 +70,7 @@ def run_user_dbt_refresh(
     run_uuid: str,
     config_snapshot: dict[str, Any],
     *,
+    source_connector_run_uuid: str,
     publisher: Any | None = None,
 ) -> dict[str, Any]:
     """Stage, build/test, and optionally publish one immutable user partition."""
@@ -83,7 +84,7 @@ def run_user_dbt_refresh(
     )
     user = staged["user_uuid"]
     run = staged["run_uuid"]
-    run_user_dbt_build(user, run)
+    run_user_dbt_build(user, run, source_connector_run_uuid)
     results = read_user_result_partition(service, user, run)
     publication_result = None
     if publisher is not None:
@@ -97,6 +98,7 @@ def run_user_dbt_refresh(
     return {
         "user_uuid": user,
         "run_uuid": run,
+        "source_connector_run_uuid": source_connector_run_uuid,
         "config_hash": staged["config_hash"],
         "staged_rows": staged["staged_rows"],
         "dbt_completed": True,

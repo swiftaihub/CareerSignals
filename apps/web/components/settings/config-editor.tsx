@@ -177,7 +177,7 @@ export function ConfigEditor({ type, readOnly }: { type: ConfigType; readOnly: b
         <div className="flex flex-wrap gap-2">
           <button className="btn" type="button" onClick={loadHistory}><History className="h-4 w-4" />History</button>
           <button className="btn" disabled={readOnly || busy} type="button" onClick={() => perform(() => resetConfig(type), "All fields now use repository defaults.")}><RotateCcw className="h-4 w-4" />Reset all</button>
-          <button className="btn btn-primary" disabled={readOnly || busy} type="button" onClick={() => perform(() => saveConfig(type, draft), "Configuration saved as a new revision.")}><Save className="h-4 w-4" />Save</button>
+          <button className="btn btn-primary" disabled={readOnly || busy} type="button" onClick={() => perform(() => saveConfig(type, draft), "Your preferences were saved. Updated search criteria will be included in the next applicable global refresh. Saving preferences does not immediately run external job connectors.")}><Save className="h-4 w-4" />Save</button>
         </div>
       </div>
       {readOnly ? <p className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Demo data is fixed and read-only.</p> : null}
