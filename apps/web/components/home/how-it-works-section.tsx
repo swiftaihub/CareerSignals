@@ -2,17 +2,35 @@
 
 import Image from "next/image";
 import { type CSSProperties, useEffect, useRef, useState } from "react";
-import { BriefcaseBusiness, ListChecks, RefreshCw, UserRoundCheck } from "lucide-react";
+import {
+  BadgeDollarSign,
+  BriefcaseBusiness,
+  Building2,
+  ListChecks,
+  MapPin,
+  RefreshCw,
+  SlidersHorizontal,
+  UserRoundCheck
+} from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
 import { HOW_IT_WORKS_STEPS } from "./home-content";
 
 const icons = [UserRoundCheck, RefreshCw, BriefcaseBusiness, ListChecks];
+const matchingSignals = [
+  { label: "Skills & seniority", icon: UserRoundCheck },
+  { label: "Salary expectations", icon: BadgeDollarSign },
+  { label: "Location & work model", icon: MapPin },
+  { label: "Industry & visa signals", icon: Building2 }
+];
+const constellationStages = ["Profile sun", "Market planet", "Evidence moon", "Application launch"];
 
 export function HowItWorksSection() {
   const stepRefs = useRef<Array<HTMLElement | null>>([]);
-  const [activeStep, setActiveStep] = useState(0);
+  const [scrollActiveStep, setScrollActiveStep] = useState(0);
+  const [interactiveStep, setInteractiveStep] = useState<number | null>(null);
+  const activeStep = interactiveStep ?? scrollActiveStep;
 
   useEffect(() => {
     if (typeof IntersectionObserver === "undefined") return;
@@ -24,7 +42,7 @@ export function HowItWorksSection() {
           .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
         if (!visible) return;
         const index = Number((visible.target as HTMLElement).dataset.stepIndex);
-        if (Number.isInteger(index)) setActiveStep(index);
+        if (Number.isInteger(index)) setScrollActiveStep(index);
       },
       { rootMargin: "-28% 0px -38%", threshold: [0.2, 0.5, 0.75] }
     );
@@ -44,7 +62,7 @@ export function HowItWorksSection() {
         </div>
 
         <div className="mt-12 grid gap-10 lg:grid-cols-[1.08fr_0.92fr] lg:gap-16">
-          <div className="lg:sticky lg:top-28 lg:self-start">
+          <div className="story-sticky-stack lg:sticky lg:top-20 lg:self-start">
             <div className="story-visual">
               <div className="flex items-center justify-between gap-3">
                 <span className="text-xs font-bold uppercase tracking-[0.14em] text-teal-700">Personal matching flow</span>
@@ -86,6 +104,60 @@ export function HowItWorksSection() {
                   <p className="text-sm font-bold text-slate-950">{HOW_IT_WORKS_STEPS[activeStep].title}</p>
                 </div>
               </div>
+              <div className="story-signals">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Signals in view</p>
+                    <p className="mt-1 text-sm font-bold text-slate-950">The evidence behind each ranking</p>
+                  </div>
+                  <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-950 text-white">
+                    <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
+                  </span>
+                </div>
+                <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                  {matchingSignals.map((signal) => {
+                    const SignalIcon = signal.icon;
+                    return (
+                      <div className="story-signal-chip" key={signal.label}>
+                        <SignalIcon className="h-3.5 w-3.5 text-teal-700" aria-hidden="true" />
+                        {signal.label}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+            <div className="story-constellation">
+              <div className="constellation-grid" aria-hidden="true" />
+              <div className="relative z-10 flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.14em] text-cyan-200">Signal constellation</p>
+                  <p className="mt-1 max-w-xs text-sm font-semibold leading-6 text-white">
+                    Every stage brings the right evidence into focus.
+                  </p>
+                </div>
+                <span className="rounded-full border border-white/15 bg-white/10 px-2.5 py-1 text-xs font-bold text-cyan-100">
+                  0{activeStep + 1}
+                </span>
+              </div>
+
+              <div
+                className="constellation-canvas"
+                aria-label={`Active signal stage: ${HOW_IT_WORKS_STEPS[activeStep].title}`}
+              >
+                <div className={cn("constellation-universe", `is-step-${activeStep + 1}`)} aria-hidden="true">
+                  <div className="solar-orbit" />
+                  <div className="celestial-sun" />
+                  <div className="celestial-planet"><span /></div>
+                  <div className="moon-orbit" />
+                  <div className="celestial-moon"><span /></div>
+                  <div className="celestial-rocket"><span /></div>
+                </div>
+                <div className="constellation-caption">
+                  <span>Step {activeStep + 1}</span>
+                  <strong>{constellationStages[activeStep]}</strong>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -98,7 +170,12 @@ export function HowItWorksSection() {
                   className={cn("timeline-step", index === activeStep && "is-active")}
                   data-step-index={index}
                   key={step.title}
+                  onBlur={() => setInteractiveStep(null)}
+                  onFocus={() => setInteractiveStep(index)}
+                  onMouseEnter={() => setInteractiveStep(index)}
+                  onMouseLeave={() => setInteractiveStep(null)}
                   ref={(element) => { stepRefs.current[index] = element; }}
+                  tabIndex={0}
                 >
                   <div className="timeline-marker">
                     <Icon className="h-5 w-5" aria-hidden="true" />
