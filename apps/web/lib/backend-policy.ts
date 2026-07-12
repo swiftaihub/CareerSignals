@@ -2,6 +2,7 @@ const ALLOWED_BACKEND_PATHS = [
   /^\/api\/health$/,
   /^\/api\/me$/,
   /^\/api\/configs(?:\/.*)?$/,
+  /^\/api\/preferences(?:\/.*)?$/,
   /^\/api\/data-freshness$/,
   /^\/api\/pipeline-runs(?:\/.*)?$/,
   /^\/api\/jobs(?:\/.*)?$/,

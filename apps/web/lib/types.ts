@@ -233,6 +233,120 @@ export interface ConfigVersion {
   created_at: string;
 }
 
+export interface PreferenceOption {
+  value: string;
+  label: string;
+}
+
+export interface CompensationPreferences {
+  minimum_salary: number | null;
+  preferred_salary: number | null;
+  currency: string;
+  period: string;
+}
+
+export interface SearchPreferences {
+  job_titles: string[];
+  industries: string[];
+  seniority: string[];
+  country: string;
+  locations: string[];
+  work_arrangements: string[];
+  employment_types: string[];
+  visa_preferences: string[];
+  excluded_companies: string[];
+  excluded_titles: string[];
+  compensation: CompensationPreferences;
+}
+
+export interface PreferenceSkill {
+  name: string;
+  category?: string | null;
+}
+
+export type MatchPriorityKey =
+  | "title_match"
+  | "required_skill_match"
+  | "industry_match"
+  | "salary_match"
+  | "work_arrangement_match"
+  | "visa_signal_match";
+
+export type MatchPriorities = Record<MatchPriorityKey, number>;
+
+export interface GeneratedSearchTitle {
+  title: string;
+  variations: string[];
+}
+
+export interface GeneratedSkillAlias {
+  canonical: string;
+  aliases: string[];
+  category?: string | null;
+  source?: string | null;
+  confidence?: number | null;
+}
+
+export interface PreferencesGeneratedPreview {
+  search_titles: GeneratedSearchTitle[];
+  skill_aliases: GeneratedSkillAlias[];
+}
+
+export interface PreferencesRevision {
+  bundle_uuid?: string | null;
+  revision?: number | null;
+  config_revision_map?: Record<string, number>;
+  generator_version?: string | null;
+  created_at?: string | null;
+}
+
+export interface PreferencesRevisionEntry extends PreferencesRevision {
+  status?: string | null;
+  created_by?: string | null;
+}
+
+export interface PreferencesDocument {
+  search_preferences: SearchPreferences;
+  skills: PreferenceSkill[];
+  skill_categories: string[];
+  match_priorities: MatchPriorities;
+  generated_preview: PreferencesGeneratedPreview;
+  revision: PreferencesRevision;
+  revision_history: PreferencesRevisionEntry[];
+  warnings: string[];
+  profile_completeness: number;
+}
+
+export type EditablePreferences = Pick<
+  PreferencesDocument,
+  "search_preferences" | "skills" | "skill_categories" | "match_priorities"
+>;
+
+export interface PreferencesOptions {
+  countries: PreferenceOption[];
+  locations: PreferenceOption[];
+  industries: PreferenceOption[];
+  seniority_levels: PreferenceOption[];
+  employment_types: PreferenceOption[];
+  work_arrangements: PreferenceOption[];
+  visa_options: PreferenceOption[];
+  companies: PreferenceOption[];
+  job_titles: PreferenceOption[];
+}
+
+export type PreferenceDynamicOptionKind =
+  | "locations"
+  | "industries"
+  | "companies"
+  | "job_titles";
+
+export interface PreferencesPreviewResponse {
+  generated_preview: PreferencesGeneratedPreview;
+  warnings: string[];
+  profile_completeness?: number;
+  derived_candidate_profile?: Record<string, unknown>;
+}
+
 export interface DataFreshnessSource {
   source_name: string;
   last_successful_refresh_at?: string | null;

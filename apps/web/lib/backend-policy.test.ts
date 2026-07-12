@@ -6,6 +6,9 @@ describe("backendPathFromSegments", () => {
   it("allows only the application API surface exposed through the BFF", () => {
     expect(backendPathFromSegments(["api", "me"])).toBe("/api/me");
     expect(backendPathFromSegments(["api", "jobs", "job id"])).toBe("/api/jobs/job%20id");
+    expect(backendPathFromSegments(["api", "preferences", "preview"])).toBe("/api/preferences/preview");
+    expect(backendPathFromSegments(["api", "preferences", "history", "12", "restore"]))
+      .toBe("/api/preferences/history/12/restore");
     expect(backendPathFromSegments(["api", "admin", "users"])).toBe("/api/admin/users");
   });
 
