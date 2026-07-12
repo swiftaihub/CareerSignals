@@ -19,6 +19,7 @@ EXPECTED_MIGRATIONS = [
     "0013_global_bootstrap_pipeline.sql",
     "0014_cumulative_personal_results.sql",
     "0015_config_bundle_revisions.sql",
+    "0016_pipeline_quota_resets.sql",
 ]
 
 RLS_TABLES = {
@@ -138,6 +139,14 @@ def test_shared_skill_alias_catalog_has_normalized_dedup_and_admin_only_rls() ->
     assert "confidence between 0 and 1" in migration
     assert "skill_alias_catalog_admin_select" in migration
     assert "using (public.is_current_user_admin())" in migration
+
+
+def test_pipeline_quota_reset_marker_preserves_run_history() -> None:
+    migration = _sql("0016_pipeline_quota_resets.sql")
+
+    assert "add column pipeline_quota_reset_at timestamptz" in migration
+    assert "user_profiles_pipeline_quota_reset_idx" in migration
+    assert "delete from public.user_pipeline_runs" not in migration
 
 
 def test_demo_seed_is_fixed_read_only_and_has_exactly_twenty_jobs() -> None:

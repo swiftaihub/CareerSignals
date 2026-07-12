@@ -347,3 +347,34 @@ class AdminService:
             request=request,
         )
         return {"detail": "User sessions were revoked."}
+
+    def refresh_pipeline_quota(
+        self,
+        *,
+        admin: CurrentUser,
+        target_user_uuid: UUID | str,
+        request: Request,
+    ) -> dict[str, str]:
+        before = self.users.require_user(target_user_uuid)
+        if before["role"] == "demo":
+            raise APIError(409, "The Demo pipeline is disabled.", "DEMO_PIPELINE_DISABLED")
+        updated = self.store.execute(
+            """
+            update public.user_profiles
+            set pipeline_quota_reset_at = now()
+            where user_uuid = %s and deleted_at is null
+            """,
+            [str(target_user_uuid)],
+        )
+        if updated != 1:
+            raise APIError(404, "User was not found.", "USER_NOT_FOUND")
+        after = self.users.require_user(target_user_uuid)
+        self._audit(
+            admin=admin,
+            target_user_uuid=target_user_uuid,
+            action="pipeline_quota_refreshed",
+            before=before,
+            after=after,
+            request=request,
+        )
+        return {"detail": "The user's daily pipeline allowance was refreshed."}

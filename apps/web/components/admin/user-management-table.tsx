@@ -82,6 +82,9 @@ export function UserManagementTable() {
       }
       return;
     }
+    if (name === "refresh-pipeline-quota" && !window.confirm(
+      `Refresh ${user.username}'s daily pipeline allowance? Their run history will be preserved.`
+    )) return;
 
     setActingUserUuid(user.user_uuid);
     try {
@@ -200,6 +203,7 @@ export function UserManagementTable() {
                       <option value="restore">Restore</option>
                       <option value="reset-password">Reset password</option>
                       <option value="revoke-sessions">Revoke sessions</option>
+                      <option value="refresh-pipeline-quota">Refresh pipeline quota</option>
                       <option value="delete">Soft delete</option>
                     </select>
                   </td>

@@ -1,7 +1,7 @@
 # Database migrations and rollback
 
 CareerSignals uses an ordered, forward-only Supabase migration stack in
-`supabase/migrations`. The fifteen files must be applied in numeric order. They
+`supabase/migrations`. The sixteen files must be applied in numeric order. They
 create the PostgreSQL control plane, serving tables, helper functions, RLS,
 constraints, and indexes. No migration or seed contains credentials.
 

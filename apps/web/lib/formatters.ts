@@ -59,6 +59,21 @@ export function formatDateTime(value?: string | null) {
   }).format(date);
 }
 
+export function formatEasternDateTime(value?: string | null) {
+  if (!value) return "Unknown";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone: "America/New_York",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short"
+  }).format(date);
+}
+
 export function formatNullable(value?: string | number | boolean | null) {
   if (value === null || value === undefined || value === "") {
     return "Unknown";

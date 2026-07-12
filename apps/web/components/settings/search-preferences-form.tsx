@@ -69,6 +69,8 @@ export function SearchPreferencesForm({
   return (
     <SectionCard
       className="mt-6 scroll-mt-24"
+      collapsible
+      defaultOpen
       title="Search Preferences"
       description="Tell CareerSignals what a worthwhile opportunity looks like. Search expansions and system keywords are generated for you."
     >

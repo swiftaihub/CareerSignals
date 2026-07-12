@@ -17,9 +17,10 @@ from packages.careersignal_core.repositories.errors import (
     PipelineDailyLimitError,
 )
 from packages.careersignal_core.repositories.pipeline_runs import (
+    PIPELINE_QUOTA_USAGE_SQL,
     PUBLIC_RUN_COLUMNS,
-    QUOTA_WINDOW_START_SQL,
     PipelineRunRepository,
+    pipeline_quota_window,
 )
 from packages.careersignal_core.storage.postgres import PostgresStore
 
@@ -162,16 +163,16 @@ class BootstrapRepository:
                 return self._run_for_workflow(connection, existing)
 
             if daily_limit is not None:
+                window_start, window_end = pipeline_quota_window()
                 recent = connection.execute(
-                    f"""
-                    select count(*) as count
-                    from public.user_pipeline_runs
-                    where user_uuid = %s
-                      and submitted_at >= {QUOTA_WINDOW_START_SQL}
-                      and submitted_at < {QUOTA_WINDOW_START_SQL} + interval '1 day'
-                      and status = 'completed'
-                    """,
-                    [str(user_uuid)],
+                    PIPELINE_QUOTA_USAGE_SQL,
+                    [
+                        str(user_uuid),
+                        window_start,
+                        str(user_uuid),
+                        window_start,
+                        window_end,
+                    ],
                 ).fetchone()
                 if int(recent["count"]) >= daily_limit:
                     raise PipelineDailyLimitError("Daily pipeline limit reached")

@@ -36,6 +36,8 @@ export function SkillsEditor({
   return (
     <SectionCard
       className="mt-6 scroll-mt-24"
+      collapsible
+      defaultOpen
       title="Skills & Experience"
       description="Add skills, tools, domains, certifications, or areas of expertise from any profession. Alias generation happens automatically."
     >

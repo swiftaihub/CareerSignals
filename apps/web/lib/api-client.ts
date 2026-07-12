@@ -429,7 +429,7 @@ export const getAdminUsers = (filters: Record<string, unknown> = {}) =>
 export const createAdminUser = (body: Record<string, unknown>) =>
   apiRequest<AdminUser>("/api/admin/users", { method: "POST", body });
 type AdminProfileAction = "activate" | "expire" | "grant-days" | "reduce-days" | "suspend" | "restore";
-type AdminMessageAction = "reset-password" | "revoke-sessions";
+type AdminMessageAction = "reset-password" | "revoke-sessions" | "refresh-pipeline-quota";
 
 export function mutateAdminUser(
   userUuid: string,

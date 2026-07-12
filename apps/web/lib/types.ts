@@ -483,6 +483,7 @@ export interface AdminUser {
   last_login_at?: string | null;
   last_activity_at?: string | null;
   last_successful_pipeline_run_uuid?: string | null;
+  pipeline_quota_reset_at?: string | null;
 }
 
 export interface AdminUserList {

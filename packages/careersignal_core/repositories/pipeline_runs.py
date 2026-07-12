@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import datetime, time, timedelta, timezone
 from typing import Any
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from psycopg.types.json import Jsonb
 
@@ -23,7 +25,43 @@ error_code, public_error_message, is_current_result, source_connector_run_uuid,
 is_bootstrap_run, trigger_type, bootstrap_uuid, config_bundle_revision_uuid
 """
 
-QUOTA_WINDOW_START_SQL = "date_trunc('day', now() at time zone 'UTC') at time zone 'UTC'"
+PIPELINE_QUOTA_TIMEZONE = ZoneInfo("America/New_York")
+PIPELINE_QUOTA_RESET_TIME = time(hour=6)
+
+
+def pipeline_quota_window(now: datetime | None = None) -> tuple[datetime, datetime]:
+    """Return the current 6 AM America/New_York quota window in UTC."""
+
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    eastern = current.astimezone(PIPELINE_QUOTA_TIMEZONE)
+    window_start = eastern.replace(
+        hour=PIPELINE_QUOTA_RESET_TIME.hour,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    if eastern < window_start:
+        window_start -= timedelta(days=1)
+    window_end = window_start + timedelta(days=1)
+    return window_start.astimezone(timezone.utc), window_end.astimezone(timezone.utc)
+
+
+PIPELINE_QUOTA_USAGE_SQL = """
+select count(*)::integer as count
+from public.user_pipeline_runs
+where user_uuid = %s
+  and submitted_at >= greatest(
+      %s::timestamptz,
+      coalesce(
+          (select pipeline_quota_reset_at from public.user_profiles where user_uuid = %s),
+          %s::timestamptz
+      )
+  )
+  and submitted_at < %s::timestamptz
+  and status = 'completed'
+"""
 
 
 class PipelineRunRepository:
@@ -45,16 +83,16 @@ class PipelineRunRepository:
     ) -> dict[str, Any]:
         def _create(active_connection: Any) -> dict[str, Any]:
             if daily_limit is not None:
+                window_start, window_end = pipeline_quota_window()
                 recent = active_connection.execute(
-                    f"""
-                    select count(*) as count
-                    from public.user_pipeline_runs
-                    where user_uuid = %s
-                      and submitted_at >= {QUOTA_WINDOW_START_SQL}
-                      and submitted_at < {QUOTA_WINDOW_START_SQL} + interval '1 day'
-                      and status = 'completed'
-                    """,
-                    [str(user_uuid)],
+                    PIPELINE_QUOTA_USAGE_SQL,
+                    [
+                        str(user_uuid),
+                        window_start,
+                        str(user_uuid),
+                        window_start,
+                        window_end,
+                    ],
                 ).fetchone()
                 if int(recent["count"]) >= daily_limit:
                     raise PipelineDailyLimitError("Daily pipeline limit reached")
@@ -115,27 +153,26 @@ class PipelineRunRepository:
         *,
         daily_limit: int | None,
     ) -> dict[str, Any]:
+        window_start, window_end = pipeline_quota_window()
         row = self.store.fetch_one(
-            f"""
-            select
-                count(*) filter (where status = 'completed')::integer as used,
-                {QUOTA_WINDOW_START_SQL} as window_start,
-                {QUOTA_WINDOW_START_SQL} + interval '1 day' as window_end
-            from public.user_pipeline_runs
-            where user_uuid = %s
-              and submitted_at >= {QUOTA_WINDOW_START_SQL}
-              and submitted_at < {QUOTA_WINDOW_START_SQL} + interval '1 day'
-            """,
-            [str(user_uuid)],
+            PIPELINE_QUOTA_USAGE_SQL,
+            [
+                str(user_uuid),
+                window_start,
+                str(user_uuid),
+                window_start,
+                window_end,
+            ],
         ) or {}
-        used = int(row.get("used") or 0)
+        raw_used = int(row.get("count") or 0)
+        used = raw_used if daily_limit is None else min(raw_used, daily_limit)
         return {
             "limit": daily_limit,
             "used": used,
             "remaining": None if daily_limit is None else max(0, daily_limit - used),
-            "window_start": row.get("window_start"),
-            "window_end": row.get("window_end"),
-            "resets_at": row.get("window_end"),
+            "window_start": window_start,
+            "window_end": window_end,
+            "resets_at": window_end,
         }
 
     def list_for_user(self, user_uuid: UUID | str, *, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:

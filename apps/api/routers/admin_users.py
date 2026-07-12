@@ -200,6 +200,17 @@ def revoke_sessions(
     return AdminService().revoke_sessions(admin=admin, target_user_uuid=user_uuid, request=request)
 
 
+@router.post("/{user_uuid}/refresh-pipeline-quota")
+def refresh_pipeline_quota(
+    user_uuid: UUID, request: Request, admin: CurrentUser = Depends(require_admin)
+) -> dict[str, str]:
+    return AdminService().refresh_pipeline_quota(
+        admin=admin,
+        target_user_uuid=user_uuid,
+        request=request,
+    )
+
+
 @router.delete("/{user_uuid}")
 def delete_user(
     user_uuid: UUID, request: Request, admin: CurrentUser = Depends(require_admin)

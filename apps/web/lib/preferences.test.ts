@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { formatEasternDateTime } from "./formatters";
 import {
   MATCH_PRIORITY_KEYS,
   MATCH_PRIORITY_PRESETS,
@@ -137,5 +138,10 @@ describe("pipeline status feedback", () => {
     expect(pipelineQuotaExhausted({ ...window, limit: 2, remaining: 0 })).toBe(true);
     expect(pipelineQuotaExhausted({ ...window, limit: 2, remaining: 1 })).toBe(false);
     expect(pipelineQuotaExhausted({ ...window, limit: null, remaining: null })).toBe(false);
+  });
+
+  it("renders quota resets in the fixed New York time zone", () => {
+    expect(formatEasternDateTime("2026-07-12T10:00:00Z")).toMatch(/6:00 AM EDT/);
+    expect(formatEasternDateTime("2026-12-12T11:00:00Z")).toMatch(/6:00 AM EST/);
   });
 });

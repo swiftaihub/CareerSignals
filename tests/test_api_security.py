@@ -4,6 +4,7 @@ from datetime import datetime
 from uuid import UUID
 
 import pytest
+from starlette.requests import Request
 
 from apps.api.dependencies.authorization import require_active_user
 from apps.api.dependencies import auth as auth_dependencies
@@ -106,3 +107,57 @@ def test_demo_authorization_scheme_resolves_demo_identity(monkeypatch: pytest.Mo
 
     assert identity.user_uuid == UUID("00000000-0000-4000-8000-000000000020")
     assert identity.role == "demo"
+
+
+def test_admin_pipeline_quota_refresh_preserves_history_and_is_audited() -> None:
+    profile = {
+        "user_uuid": "22222222-2222-4222-8222-222222222222",
+        "username": "quota-user",
+        "role": "user",
+        "pipeline_quota_reset_at": None,
+    }
+    actions: list[dict[str, object]] = []
+
+    class FakeUsers:
+        def require_user(self, user_uuid: object) -> dict[str, object]:
+            assert str(user_uuid) == profile["user_uuid"]
+            return dict(profile)
+
+    class FakeStore:
+        def execute(self, statement: str, params: list[str]) -> int:
+            assert "set pipeline_quota_reset_at = now()" in " ".join(statement.split())
+            assert params == [profile["user_uuid"]]
+            profile["pipeline_quota_reset_at"] = "2026-07-12T12:00:00Z"
+            return 1
+
+    class FakeActivity:
+        def record_admin_action(self, **kwargs: object) -> None:
+            actions.append(kwargs)
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/admin/users/quota/refresh-pipeline-quota",
+            "headers": [],
+            "client": ("127.0.0.1", 1234),
+        }
+    )
+    service = AdminService(
+        users=FakeUsers(),
+        entitlements=object(),
+        activity=FakeActivity(),
+        store=FakeStore(),
+        supabase=object(),
+    )
+
+    result = service.refresh_pipeline_quota(
+        admin=_user(role="admin"),
+        target_user_uuid=profile["user_uuid"],
+        request=request,
+    )
+
+    assert result == {"detail": "The user's daily pipeline allowance was refreshed."}
+    assert actions[0]["action_name"] == "pipeline_quota_refreshed"
+    assert actions[0]["before_state"]["pipeline_quota_reset_at"] is None
+    assert actions[0]["after_state"]["pipeline_quota_reset_at"] is not None

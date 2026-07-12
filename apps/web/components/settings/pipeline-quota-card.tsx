@@ -1,5 +1,6 @@
 import { Gauge, RefreshCcw } from "lucide-react";
 
+import { formatEasternDateTime } from "@/lib/formatters";
 import type { PipelineQuota } from "@/lib/types";
 
 function refreshLabel(remaining: number) {
@@ -7,23 +8,6 @@ function refreshLabel(remaining: number) {
     return "1 refresh available";
   }
   return `${remaining} refreshes available`;
-}
-
-function resetDate(value?: string) {
-  if (!value) {
-    return "the configured quota window";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "the configured quota window";
-  }
-  const day = new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit"
-  }).format(date);
-  return day;
 }
 
 export function PipelineQuotaCard({ quota }: { quota?: PipelineQuota | null }) {
@@ -58,7 +42,7 @@ export function PipelineQuotaCard({ quota }: { quota?: PipelineQuota | null }) {
       <div className="mt-4 rounded-md border border-border bg-background p-3 text-sm">
         <div className="flex items-center gap-2 font-medium text-foreground">
           <RefreshCcw className="h-4 w-4 text-primary" />
-          Resets {resetDate(quota?.resets_at)}
+          Resets {formatEasternDateTime(quota?.resets_at)}
         </div>
         <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
           <div

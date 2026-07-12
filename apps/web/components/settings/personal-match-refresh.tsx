@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { CheckCircle2, Download, ExternalLink, Loader2, Play, XCircle } from "lucide-react";
+import { CheckCircle2, ChevronDown, Download, ExternalLink, Loader2, Play, XCircle } from "lucide-react";
 
 import { SectionCard } from "@/components/shared/section-card";
-import { formatDateTime } from "@/lib/formatters";
+import { formatDateTime, formatEasternDateTime } from "@/lib/formatters";
 import { latestApplicablePipelineFailure, pipelineQuotaExhausted } from "@/lib/preferences";
 import type { PipelineQuota, UserPipelineRun } from "@/lib/types";
 
@@ -80,11 +80,14 @@ export function PersonalMatchRefresh({
           <button className="btn" disabled={readOnly || busy} type="button" onClick={onExport}><Download className="h-4 w-4" />Export Current Results</button>
         </div>
         {readOnly ? <p className="mt-3 text-sm text-amber-800">Demo refresh and export actions are read-only.</p> : null}
-        {quotaExhausted ? <p className="mt-3 text-sm text-amber-800">Your successful-refresh allowance resets {formatDateTime(quota?.resets_at)}. Failed and cancelled attempts do not count.</p> : null}
+        {quotaExhausted ? <p className="mt-3 text-sm text-amber-800">Your successful-refresh allowance resets {formatEasternDateTime(quota?.resets_at)}. Failed and cancelled attempts do not count.</p> : null}
         {message ? <p className="mt-3 text-sm font-medium text-primary" aria-live="polite">{message}</p> : null}
 
-        <div className="mt-6 border-t border-border pt-5">
-          <h3 className="text-sm font-semibold text-foreground">Recent refresh history</h3>
+        <details className="group mt-6 border-t border-border pt-5">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-md py-2 text-sm font-semibold text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+            Recent refresh history
+            <ChevronDown className="h-4 w-4 text-muted-foreground transition group-open:rotate-180 motion-reduce:transition-none" aria-hidden="true" />
+          </summary>
           <div className="mt-3 space-y-3">
             {runs.length ? runs.slice(0, 8).map((run) => (
               <article className="rounded-lg border border-border bg-background p-4" key={run.run_uuid}>
@@ -115,7 +118,7 @@ export function PersonalMatchRefresh({
               </article>
             )) : <p className="rounded-lg border border-dashed border-border p-5 text-sm text-muted-foreground">No personal match refreshes yet.</p>}
           </div>
-        </div>
+        </details>
       </div>
     </SectionCard>
   );

@@ -24,6 +24,7 @@ select
     p.last_login_at,
     p.last_activity_at,
     p.last_successful_pipeline_run_uuid,
+    p.pipeline_quota_reset_at,
     p.deleted_at,
     case
       when p.role in ('admin', 'demo') then null

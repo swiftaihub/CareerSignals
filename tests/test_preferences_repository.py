@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from typing import Any, Iterator
 
 import pytest
@@ -11,7 +12,10 @@ from packages.careersignal_core.repositories.errors import (
     PipelineDailyLimitError,
 )
 from packages.careersignal_core.repositories.preferences import PreferencesRepository
-from packages.careersignal_core.repositories.pipeline_runs import PipelineRunRepository
+from packages.careersignal_core.repositories.pipeline_runs import (
+    PipelineRunRepository,
+    pipeline_quota_window,
+)
 from src.config.loader import CONFIG_TYPES, build_config_snapshot
 
 
@@ -203,7 +207,7 @@ class PipelineConnection:
 
     def execute(self, statement: str, params: list[Any] | None = None) -> Cursor:
         normalized = " ".join(statement.casefold().split())
-        if "select count(*) as count" in normalized:
+        if "select count(*)" in normalized and "as count" in normalized:
             self.quota_statement = normalized
             return Cursor(one={"count": self.completed_count})
         if "insert into public.user_pipeline_runs" in normalized:
@@ -286,31 +290,57 @@ def test_only_completed_pipeline_runs_consume_daily_quota() -> None:
 
 
 class QuotaStore:
+    def __init__(self, *, count: int = 1) -> None:
+        self.params: list[Any] = []
+        self.count = count
+
     def fetch_one(self, statement: str, params: list[Any]) -> dict[str, Any]:
         normalized = " ".join(statement.casefold().split())
-        assert params == [USER_UUID]
-        assert "count(*) filter (where status = 'completed')" in normalized
-        return {
-            "used": 1,
-            "window_start": "2026-07-12T00:00:00Z",
-            "window_end": "2026-07-13T00:00:00Z",
-        }
+        self.params = params
+        assert params[0] == USER_UUID
+        assert params[2] == USER_UUID
+        assert "status = 'completed'" in normalized
+        assert "pipeline_quota_reset_at" in normalized
+        return {"count": self.count}
 
 
 def test_pipeline_quota_reports_successful_usage_and_reset_time() -> None:
-    quota = PipelineRunRepository(store=QuotaStore()).quota_for_user(
+    store = QuotaStore()
+    quota = PipelineRunRepository(store=store).quota_for_user(
         USER_UUID,
         daily_limit=2,
     )
 
-    assert quota == {
-        "limit": 2,
-        "used": 1,
-        "remaining": 1,
-        "window_start": "2026-07-12T00:00:00Z",
-        "window_end": "2026-07-13T00:00:00Z",
-        "resets_at": "2026-07-13T00:00:00Z",
-    }
+    assert quota["limit"] == 2
+    assert quota["used"] == 1
+    assert quota["remaining"] == 1
+    assert quota["window_start"] == store.params[1]
+    assert quota["window_end"] == store.params[4]
+    assert quota["resets_at"] == store.params[4]
+
+
+def test_pipeline_quota_window_resets_at_six_am_new_york() -> None:
+    before_start, before_end = pipeline_quota_window(
+        datetime(2026, 7, 12, 9, 59, tzinfo=timezone.utc)
+    )
+    after_start, after_end = pipeline_quota_window(
+        datetime(2026, 7, 12, 10, 0, tzinfo=timezone.utc)
+    )
+
+    assert before_start == datetime(2026, 7, 11, 10, 0, tzinfo=timezone.utc)
+    assert before_end == datetime(2026, 7, 12, 10, 0, tzinfo=timezone.utc)
+    assert after_start == datetime(2026, 7, 12, 10, 0, tzinfo=timezone.utc)
+    assert after_end == datetime(2026, 7, 13, 10, 0, tzinfo=timezone.utc)
+
+
+def test_pipeline_quota_caps_legacy_overage_at_the_configured_limit() -> None:
+    quota = PipelineRunRepository(store=QuotaStore(count=6)).quota_for_user(
+        USER_UUID,
+        daily_limit=2,
+    )
+
+    assert quota["used"] == 2
+    assert quota["remaining"] == 0
 
 
 class AliasCursor:

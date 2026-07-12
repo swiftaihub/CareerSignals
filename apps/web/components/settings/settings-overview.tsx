@@ -1,7 +1,7 @@
 import { CheckCircle2, Clock3, Database, RefreshCcw, Sparkles, UserRoundCheck } from "lucide-react";
 
 import { SectionCard } from "@/components/shared/section-card";
-import { formatDateTime } from "@/lib/formatters";
+import { formatDateTime, formatEasternDateTime } from "@/lib/formatters";
 import type { DataFreshness, PipelineQuota, UserPipelineRun } from "@/lib/types";
 
 function OverviewCard({
@@ -81,7 +81,7 @@ export function SettingsOverview({
         >
           <div className="mt-3 flex items-center gap-2 text-xs font-medium text-muted-foreground">
             <Clock3 className="h-3.5 w-3.5" />
-            Resets {formatDateTime(quota?.resets_at)}
+            Resets {formatEasternDateTime(quota?.resets_at)}
           </div>
         </OverviewCard>
         <OverviewCard
