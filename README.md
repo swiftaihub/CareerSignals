@@ -258,16 +258,19 @@ CONNECTOR_REFRESH_TIMEZONE=America/New_York
 CONNECTOR_REFRESH_TRIGGER_MODE=scheduled
 ```
 
-The scheduler enqueues metadata only; the worker claims global runs and uses the same lock/publication path for scheduled, Admin, and first-user bootstrap refreshes. Normal users do not receive a global refresh endpoint.
+The scheduler enqueues metadata only; the worker claims global runs and uses the same lock/publication path for scheduled, Admin, CLI, and first-user bootstrap refreshes. Normal users do not receive a global refresh endpoint.
 
 The personal pipeline is user-owned. It never imports connector clients, never runs `shared_refresh`, never accepts a browser-supplied `user_uuid`, and never accepts a browser-supplied dbt selector. After a user's bootstrap is complete, `POST /api/pipeline-runs` snapshots that authenticated user's config, binds the run to the latest successfully published shared connector run, and queues only `user_refresh`.
 
 First-user bootstrap is server-orchestrated. The first personal request creates a durable bootstrap workflow, snapshots the user's current config, queues a `first_user_bootstrap` global refresh that includes that frozen acquisition config, waits for successful shared publication, binds the waiting personal run to that exact `connector_run_uuid`, and then runs the personal dbt-only refresh. Duplicate first clicks return the existing workflow instead of creating another global run.
 
-Run a trusted shared refresh manually. In SaaS/PostgreSQL mode, this uses all active non-Demo users' effective `jobs_config` inputs; otherwise it falls back to `config/platform_connector_config.yml` acquisition categories:
+Enqueue a trusted production-equivalent shared refresh manually. This creates a `manual_cli` run and requires the worker to be running; the worker performs connector acquisition, MotherDuck/dbt work, and PostgreSQL publication:
 
 ```bash
 python scripts/refresh_connectors.py
+# Equivalent explicit form:
+python scripts/refresh_connectors.py --enqueue
+python -m apps.worker.main
 ```
 
 Run the fixed shared dbt selector directly against already staged shared data:

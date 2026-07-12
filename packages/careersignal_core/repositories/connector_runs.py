@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
@@ -21,6 +21,25 @@ initiating_user_included, initiating_config_revision_map, initiating_config_hash
 initiating_acquisition_hash, resulting_personal_run_uuid, included_user_count,
 acquisition_query_count
 """
+
+CONNECTOR_TRIGGER_TYPES = frozenset(
+    {"scheduled", "manual_admin", "manual_cli", "first_user_bootstrap", "internal", "admin"}
+)
+
+
+def _validated_trigger_type(trigger_type: str) -> str:
+    if trigger_type not in CONNECTOR_TRIGGER_TYPES:
+        allowed = ", ".join(sorted(CONNECTOR_TRIGGER_TYPES))
+        raise ValueError(f"Unsupported connector refresh trigger_type {trigger_type!r}; expected {allowed}")
+    return trigger_type
+
+
+def _utc_timestamp(value: datetime | None, *, field: str) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError(f"{field} must be a timezone-aware datetime")
+    return value.astimezone(timezone.utc)
 
 
 class ConnectorRunRepository:
@@ -51,9 +70,9 @@ class ConnectorRunRepository:
             returning {PUBLIC_CONNECTOR_RUN_COLUMNS}
             """
         params = [
-            trigger_type,
-            scheduled_for,
-            next_scheduled_at,
+            _validated_trigger_type(trigger_type),
+            _utc_timestamp(scheduled_for, field="scheduled_for"),
+            _utc_timestamp(next_scheduled_at, field="next_scheduled_at"),
             str(initiating_user_uuid) if initiating_user_uuid else None,
             str(bootstrap_uuid) if bootstrap_uuid else None,
             Jsonb(initiating_config_revision_map) if initiating_config_revision_map is not None else None,
@@ -69,8 +88,21 @@ class ConnectorRunRepository:
         assert row is not None
         return dict(row)
 
-    def create_if_no_active(self, *, trigger_type: str) -> dict[str, Any]:
+    def create_if_no_active(
+        self,
+        *,
+        trigger_type: str,
+        scheduled_for: datetime | None = None,
+        next_scheduled_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        _validated_trigger_type(trigger_type)
         with self.store.transaction() as connection:
+            # A row lock cannot serialize the empty-table case. This transaction
+            # lock makes the active check and insert atomic across all enqueuers.
+            connection.execute(
+                "select pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                ["careersignals:global-connector-refresh-enqueue"],
+            )
             active = connection.execute(
                 f"""
                 select {PUBLIC_CONNECTOR_RUN_COLUMNS}
@@ -83,7 +115,12 @@ class ConnectorRunRepository:
             ).fetchone()
             if active is not None:
                 raise ConflictError("A global connector refresh is already queued or running")
-            return self.create(trigger_type=trigger_type, connection=connection)
+            return self.create(
+                trigger_type=trigger_type,
+                scheduled_for=scheduled_for,
+                next_scheduled_at=next_scheduled_at,
+                connection=connection,
+            )
 
     def get(self, connector_run_uuid: UUID | str) -> dict[str, Any] | None:
         return self.store.fetch_one(

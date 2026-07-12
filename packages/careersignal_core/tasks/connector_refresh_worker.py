@@ -130,6 +130,16 @@ class ConnectorRefreshWorker:
                     shared_dbt_run_completed=shared_dbt_completed,
                     public_status_message=str(result.get("public_status_message", "Updated successfully")),
                 )
+                LOGGER.info(
+                    "Global connector refresh finished",
+                    extra={
+                        "connector_run_uuid": run_uuid,
+                        "trigger_type": run.get("trigger_type"),
+                        "scheduled_for": run.get("scheduled_for"),
+                        "next_scheduled_at": run.get("next_scheduled_at"),
+                        "execution_status": status,
+                    },
+                )
                 if run.get("trigger_type") == "first_user_bootstrap":
                     if status in {"completed", "partial"} and shared_dbt_completed:
                         self.bootstrap_repository.mark_global_succeeded(
@@ -159,6 +169,16 @@ class ConnectorRefreshWorker:
                 public_status_message="The shared-data refresh was not completed.",
                 error_code="CONNECTOR_REFRESH_FAILED",
                 internal_error_message=f"{type(exc).__name__}: {exc}",
+            )
+            LOGGER.error(
+                "Global connector refresh recorded as failed",
+                extra={
+                    "connector_run_uuid": run_uuid,
+                    "trigger_type": run.get("trigger_type"),
+                    "scheduled_for": run.get("scheduled_for"),
+                    "next_scheduled_at": run.get("next_scheduled_at"),
+                    "execution_status": "failed",
+                },
             )
             if run.get("trigger_type") == "first_user_bootstrap":
                 self.bootstrap_repository.mark_global_failed(

@@ -1,42 +1,58 @@
-"""Run the trusted shared Connector refresh process."""
+"""Enqueue a production-equivalent global connector refresh for the worker."""
 
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
 import sys
+from typing import Sequence
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.pipelines.shared_connector_refresh import run_shared_connector_refresh
+from packages.careersignal_core.repositories.connector_runs import ConnectorRunRepository
+from packages.careersignal_core.repositories.errors import ConflictError
+from packages.careersignal_core.settings import get_settings
+from packages.careersignal_core.tasks.connector_refresh_task import enqueue_connector_refresh
 from src.utils.logging import configure_logging
 
 
-def main() -> None:
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    repository: ConnectorRunRepository | None = None,
+) -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Refresh the shared job universe. SaaS/PostgreSQL mode uses all active "
-            "non-Demo users' effective job configs for acquisition inputs."
+            "Enqueue the complete shared connector, MotherDuck, dbt, and PostgreSQL "
+            "publication pipeline. The apps.worker process performs the refresh."
         )
     )
     parser.add_argument(
-        "--connector-run-uuid",
-        help="Optional scheduler-created Connector run UUID.",
+        "--enqueue",
+        action="store_true",
+        help="Enqueue the refresh (the default; retained for an explicit operator workflow).",
     )
-    args = parser.parse_args()
+    parser.parse_args(argv)
     configure_logging()
-    summary = run_shared_connector_refresh(
-        args.connector_run_uuid,
-        project_root=PROJECT_ROOT,
-    )
-    print("CareerSignal shared Connector refresh completed.")
-    print(f"Connector run UUID: {summary['connector_run_uuid']}")
-    print(f"Fetched jobs: {summary['fetched_raw_jobs']}")
-    print(f"Shared jobs: {summary['shared_jobs']}")
-    print(f"dbt completed: {summary['dbt_completed']}")
+    settings = get_settings()
+    settings.require_api_configuration()
+    repo = repository or ConnectorRunRepository()
+    try:
+        run = enqueue_connector_refresh(repository=repo, trigger_type="manual_cli")
+    except ConflictError:
+        print(
+            "Cannot enqueue: a global connector refresh is already queued or running.",
+            file=sys.stderr,
+        )
+        return 2
+
+    print("CareerSignals global refresh queued.")
+    print(f"Connector run UUID: {run['connector_run_uuid']}")
+    print("Ensure apps.worker is running: python -m apps.worker.main")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

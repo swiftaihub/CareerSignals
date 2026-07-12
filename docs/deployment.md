@@ -176,6 +176,6 @@ For a bad shared refresh, stop the worker and the scheduler if cron mode is enab
 
 - PostgreSQL `FOR UPDATE SKIP LOCKED` supports multiple worker processes, while per-user/global advisory locks prevent duplicate work.
 - MotherDuck write concurrency is separately constrained. Increase `USER_PIPELINE_MAX_CONCURRENCY` only after load and failure testing.
-- Run one scheduler leader with `CONNECTOR_REFRESH_CRON=0 7,16,21 * * *` and `CONNECTOR_REFRESH_TIMEZONE=America/New_York`. The scheduler enqueues global refresh metadata; the worker performs scheduled, Admin, and first-user bootstrap refreshes through the same global lock and publication path.
+- Run one scheduler leader with `CONNECTOR_REFRESH_CRON=0 7,16,21 * * *` and `CONNECTOR_REFRESH_TIMEZONE=America/New_York`. The scheduler enqueues global refresh metadata; the worker performs scheduled, Admin, CLI, and first-user bootstrap refreshes through the same global lock and publication path. For an operator-triggered run, use `python scripts/refresh_connectors.py --enqueue` and leave `python -m apps.worker.main` running.
 - Keep web and API clocks synchronized with UTC; format dates for locale only in the browser.
 - Use a CDN only for static Next.js assets. Do not publicly cache authenticated BFF or API responses.
