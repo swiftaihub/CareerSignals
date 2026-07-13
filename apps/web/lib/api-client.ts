@@ -31,9 +31,10 @@ import type {
   SkillGapRow,
   UserPipelineRun
 } from "@/lib/types";
+import { sanitizeInternalRedirect, withBasePath } from "@/lib/app-path";
 import { createEmptyPreferences, normalizeMatchPriorities } from "@/lib/preferences";
 
-const BFF_BASE_URL = "/api/backend";
+const BFF_BASE_PATH = "/api/backend";
 
 type RequestOptions = Omit<RequestInit, "body"> & { body?: unknown; redirectOnAuthError?: boolean };
 
@@ -228,12 +229,15 @@ function preferenceWriteBody(value: PreferencesDocument) {
 
 function redirectFor(error: ApiClientError) {
   if (typeof window === "undefined") return;
-  const next = encodeURIComponent(`${window.location.pathname}${window.location.search}`);
-  if (error.status === 401) window.location.assign(`/login?next=${next}`);
-  else if (error.errorCode === "ACCOUNT_PENDING") window.location.assign("/pending");
-  else if (error.errorCode === "ACCOUNT_EXPIRED") window.location.assign("/account-expired");
+  const nextPath = sanitizeInternalRedirect(
+    `${window.location.pathname}${window.location.search}${window.location.hash}`
+  );
+  const next = encodeURIComponent(nextPath);
+  if (error.status === 401) window.location.assign(withBasePath(`/login?next=${next}`));
+  else if (error.errorCode === "ACCOUNT_PENDING") window.location.assign(withBasePath("/pending"));
+  else if (error.errorCode === "ACCOUNT_EXPIRED") window.location.assign(withBasePath("/account-expired"));
   else if (error.errorCode === "ACCOUNT_SUSPENDED" || error.errorCode === "ACCOUNT_DELETED") {
-    window.location.assign(`/login?error=${encodeURIComponent(error.errorCode)}`);
+    window.location.assign(withBasePath(`/login?error=${encodeURIComponent(error.errorCode)}`));
   }
 }
 
@@ -261,7 +265,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   const { body, redirectOnAuthError = true, ...init } = options;
   let response: Response;
   try {
-    response = await fetch(`${BFF_BASE_URL}${path}`, {
+    response = await fetch(`${withBasePath(BFF_BASE_PATH)}${path}`, {
       ...init,
       credentials: "same-origin",
       cache: "no-store",
@@ -388,7 +392,7 @@ export const cancelPipelineRun = (runUuid: string) =>
 export async function downloadExcelExport() {
   let response: Response;
   try {
-    response = await fetch(`${BFF_BASE_URL}/api/exports/excel`, {
+    response = await fetch(`${withBasePath(BFF_BASE_PATH)}/api/exports/excel`, {
       method: "POST",
       credentials: "same-origin",
       cache: "no-store",

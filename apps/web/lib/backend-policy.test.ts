@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { backendPathFromSegments } from "./backend-policy";
+import {
+  backendPathFromSegments,
+  safeBackendRedirectLocation
+} from "./backend-policy";
 
 describe("backendPathFromSegments", () => {
   it("allows only the application API surface exposed through the BFF", () => {
@@ -24,5 +27,28 @@ describe("backendPathFromSegments", () => {
     expect(backendPathFromSegments(["api", "jobs", "nested/id"])).toBeNull();
     expect(backendPathFromSegments(["api", "jobs", "nested\\id"])).toBeNull();
     expect(backendPathFromSegments([])).toBeNull();
+  });
+});
+
+describe("safeBackendRedirectLocation", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("rewrites an allowlisted backend redirect through the base-aware BFF", () => {
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/careersignals");
+    expect(safeBackendRedirectLocation(
+      "https://api.example/api/jobs/job-1?page=2",
+      "https://api.example"
+    )).toBe("/careersignals/api/backend/api/jobs/job-1?page=2");
+  });
+
+  it("rejects cross-origin, non-allowlisted, and traversal redirects", () => {
+    expect(safeBackendRedirectLocation(
+      "https://evil.example/api/jobs/job-1",
+      "https://api.example"
+    )).toBeNull();
+    expect(safeBackendRedirectLocation("/api/auth/login", "https://api.example"))
+      .toBeNull();
+    expect(safeBackendRedirectLocation("/api/jobs/%2e%2e/admin", "https://api.example"))
+      .toBeNull();
   });
 });

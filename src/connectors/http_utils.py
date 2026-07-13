@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import requests
 
@@ -12,6 +13,21 @@ from src.config.schemas import GlobalFilters, JobCategoryConfig
 from src.utils.text_cleaning import clean_text
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _safe_url_for_log(url: str) -> str:
+    """Return only a URL origin, excluding all request-specific components."""
+
+    try:
+        parsed = urlsplit(url)
+        hostname = parsed.hostname
+        if parsed.scheme not in {"http", "https"} or not hostname:
+            return "<redacted-url>"
+        host = f"[{hostname}]" if ":" in hostname else hostname
+        netloc = f"{host}:{parsed.port}" if parsed.port is not None else host
+        return urlunsplit((parsed.scheme, netloc, "", "", ""))
+    except (TypeError, ValueError):
+        return "<redacted-url>"
 
 
 def env_int(name: str, default: int, minimum: int = 1) -> int:
@@ -56,10 +72,20 @@ def safe_get_json(
         response.raise_for_status()
         payload = response.json()
     except requests.RequestException as exc:
-        LOGGER.warning("%s request failed for %s: %s", source_name, url, exc)
+        LOGGER.warning(
+            "%s request failed for %s (%s)",
+            source_name,
+            _safe_url_for_log(url),
+            type(exc).__name__,
+        )
         return None
     except ValueError as exc:
-        LOGGER.warning("%s returned invalid JSON for %s: %s", source_name, url, exc)
+        LOGGER.warning(
+            "%s returned invalid JSON for %s (%s)",
+            source_name,
+            _safe_url_for_log(url),
+            type(exc).__name__,
+        )
         return None
 
     if not isinstance(payload, dict | list):

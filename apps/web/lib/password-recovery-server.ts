@@ -3,6 +3,7 @@ import "server-only";
 import type { Session, SupabaseClient, User } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 
+import { clearAppCookie } from "@/lib/cookie-policy";
 import {
   extractSessionId,
   isRecoveryIntentSecretConfigured,
@@ -58,7 +59,7 @@ export async function readRecoverySession(
   if (userError || !user || !sessionId) return { valid: false, reason: "session" };
 
   const identity = { userId: user.id, sessionId };
-  if (!verifyRecoveryIntent(intent, identity, secret)) {
+  if (!await verifyRecoveryIntent(intent, identity, secret)) {
     return { valid: false, reason: "intent" };
   }
 
@@ -67,8 +68,8 @@ export async function readRecoverySession(
 
 export async function clearRecoveryCookies() {
   const cookieStore = await cookies();
-  cookieStore.delete(RECOVERY_INTENT_COOKIE_NAME);
+  clearAppCookie(cookieStore, RECOVERY_INTENT_COOKIE_NAME);
   cookieStore.getAll().forEach(({ name }) => {
-    if (isRecoveryAuthCookieName(name)) cookieStore.delete(name);
+    if (isRecoveryAuthCookieName(name)) clearAppCookie(cookieStore, name);
   });
 }

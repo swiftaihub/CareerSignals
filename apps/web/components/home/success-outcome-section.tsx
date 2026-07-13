@@ -1,6 +1,8 @@
 import Image from "next/image";
 import { ArrowRight, CircleCheckBig } from "lucide-react";
 
+import { withBasePath } from "@/lib/app-path";
+
 import { SectionReveal } from "./section-reveal";
 
 export function SuccessOutcomeSection() {
@@ -16,7 +18,7 @@ export function SuccessOutcomeSection() {
               height={1024}
               loading="lazy"
               sizes="(max-width: 1023px) 94vw, 52vw"
-              src="/illustrations/offer-success.webp"
+              src={withBasePath("/illustrations/offer-success.webp")}
               width={1536}
             />
           </div>

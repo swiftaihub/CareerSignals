@@ -1,13 +1,17 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
+import { getCookiePath, getSiteOrigin, withBasePath } from "@/lib/app-path";
 import { DEMO_TOKEN_COOKIE } from "@/lib/auth";
+import {
+  clearAppCookie,
+  secureAppCookieOptions
+} from "@/lib/cookie-policy";
 import {
   createRecoveryIntent,
   RECOVERY_INTENT_COOKIE_MAX_AGE_SECONDS,
   RECOVERY_INTENT_COOKIE_NAME,
-  recoveryRedirectPath,
-  trustedSiteOrigin
+  recoveryRedirectPath
 } from "@/lib/password-recovery";
 import {
   clearRecoveryCookies,
@@ -19,10 +23,7 @@ import { createWritableRecoveryClient } from "@/lib/supabase/recovery-server";
 export async function GET(request: NextRequest) {
   let siteOrigin: string;
   try {
-    siteOrigin = trustedSiteOrigin(
-      process.env.NEXT_PUBLIC_SITE_URL,
-      process.env.NODE_ENV
-    );
+    siteOrigin = getSiteOrigin();
   } catch {
     return NextResponse.json(
       { error: "Password recovery is not configured." },
@@ -47,15 +48,13 @@ export async function GET(request: NextRequest) {
   }
 
   const cookieStore = await cookies();
-  cookieStore.delete(DEMO_TOKEN_COOKIE);
+  clearAppCookie(cookieStore, DEMO_TOKEN_COOKIE);
   cookieStore.set(
     RECOVERY_INTENT_COOKIE_NAME,
-    createRecoveryIntent(result.value.identity, secret),
+    await createRecoveryIntent(result.value.identity, secret),
     {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/",
+      ...secureAppCookieOptions(),
+      path: getCookiePath(),
       maxAge: RECOVERY_INTENT_COOKIE_MAX_AGE_SECONDS
     }
   );
@@ -63,13 +62,16 @@ export async function GET(request: NextRequest) {
   const destination = recoveryRedirectPath(
     request.nextUrl.searchParams.get("next")
   );
-  const response = NextResponse.redirect(new URL(destination, siteOrigin), 303);
+  const response = NextResponse.redirect(
+    new URL(withBasePath(destination), siteOrigin),
+    303
+  );
   applyNoStoreHeaders(response);
   return response;
 }
 
 function recoveryErrorResponse(siteOrigin: string) {
-  const destination = new URL("/forgot-password", siteOrigin);
+  const destination = new URL(withBasePath("/forgot-password"), siteOrigin);
   destination.searchParams.set("recovery_error", "invalid_or_expired");
   const response = NextResponse.redirect(destination, 303);
   applyNoStoreHeaders(response);

@@ -1,0 +1,136 @@
+name: careersignals
+
+x-application-service: &application-service
+  image: ${CAREERSIGNALS_IMAGE:?Set CAREERSIGNALS_IMAGE to an immutable SHA tag or digest}
+  init: true
+  restart: unless-stopped
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  networks:
+    - backend
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=128m
+    - /run/careersignals:rw,noexec,nosuid,size=4m,uid=10001,gid=10001
+    - /home/careersignals/.duckdb:rw,noexec,nosuid,size=512m,uid=10001,gid=10001
+    - /app/dbt/logs:rw,noexec,nosuid,size=64m,uid=10001,gid=10001
+    - /app/dbt/target:rw,noexec,nosuid,size=256m,uid=10001,gid=10001
+  stop_grace_period: 45s
+
+services:
+  api:
+    <<: *application-service
+    command:
+      - uvicorn
+      - apps.api.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --proxy-headers
+      - --forwarded-allow-ips=*
+    env_file:
+      - ${CAREERSIGNALS_ENV_DIR:-/opt/careersignals/env}/api.env
+    environment:
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+    expose:
+      - "8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 45s
+
+  worker:
+    <<: *application-service
+    command: ["python", "-m", "apps.worker.main"]
+    env_file:
+      - ${CAREERSIGNALS_ENV_DIR:-/opt/careersignals/env}/worker.env
+    environment:
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      CAREERSIGNAL_HEARTBEAT_PATH: /run/careersignals/worker.heartbeat
+      USER_PIPELINE_MAX_CONCURRENCY: "1"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -m
+        - packages.careersignal_core.heartbeat
+        - --max-age-seconds
+        - "60"
+      interval: 20s
+      timeout: 5s
+      retries: 4
+      start_period: 30s
+
+  scheduler:
+    <<: *application-service
+    container_name: careersignals-scheduler
+    command: ["python", "-m", "apps.scheduler.main"]
+    env_file:
+      - ${CAREERSIGNALS_ENV_DIR:-/opt/careersignals/env}/scheduler.env
+    environment:
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      CAREERSIGNAL_HEARTBEAT_PATH: /run/careersignals/scheduler.heartbeat
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -m
+        - packages.careersignal_core.heartbeat
+        - --max-age-seconds
+        - "60"
+      interval: 20s
+      timeout: 5s
+      retries: 4
+      start_period: 30s
+
+  reverse-proxy:
+    image: ${CADDY_IMAGE:-caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648}
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - backend
+    volumes:
+      - ./reverse-proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${CAREERSIGNALS_TLS_DIR:-/opt/careersignals/tls}:/etc/caddy/tls:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:2019/config/"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:

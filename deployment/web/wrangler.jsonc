@@ -1,0 +1,32 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "main": ".open-next/worker.js",
+  "name": "careersignals-web",
+  "compatibility_date": "2026-07-13",
+  "compatibility_flags": [
+    "nodejs_compat",
+    "global_fetch_strictly_public"
+  ],
+  "workers_dev": false,
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "images": {
+    "binding": "IMAGES"
+  },
+  "routes": [
+    {
+      "pattern": "jobs.swiftaihub.com/careersignals",
+      "zone_name": "swiftaihub.com"
+    },
+    {
+      "pattern": "jobs.swiftaihub.com/careersignals/*",
+      "zone_name": "swiftaihub.com"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}
+

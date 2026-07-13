@@ -1,0 +1,253 @@
+name: Deploy CareerSignals backend to production
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_source_sha:
+        description: Full CareerSignals main commit SHA recorded in SOURCE_MANIFEST.json
+        required: true
+        type: string
+      image_tag:
+        description: Optional confirmation tag; when set it must equal sha-<source SHA>
+        required: false
+        default: ""
+        type: string
+      apply_migrations:
+        description: Apply forward Supabase migrations after a verified backup
+        required: true
+        default: false
+        type: boolean
+      backup_reference:
+        description: Oracle verified-backup marker name (required for migrations)
+        required: false
+        default: ""
+        type: string
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: careersignals-backend-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 75
+    env:
+      GHCR_IMAGE: ${{ vars.GHCR_IMAGE }}
+      ORACLE_HOST: ${{ vars.ORACLE_HOST }}
+      ORACLE_SSH_USER: ${{ vars.ORACLE_SSH_USER }}
+      ORACLE_DEPLOY_PATH: ${{ vars.ORACLE_DEPLOY_PATH }}
+
+    steps:
+      - name: Checkout selected deployment revision
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Validate manifest and deployment artifact
+        id: source
+        env:
+          EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+          CONFIRMED_IMAGE_TAG: ${{ inputs.image_tag }}
+          APPLY_MIGRATIONS: ${{ inputs.apply_migrations }}
+          BACKUP_REFERENCE: ${{ inputs.backup_reference }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          [[ "$EXPECTED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "expected_source_sha must be a full lowercase Git SHA." >&2; exit 1; }
+          python scripts/validate-source-manifest.py --target backend --expected-sha "$EXPECTED_SOURCE_SHA"
+          python scripts/deployment_split.py validate --root . --target backend --expected-source-sha "$EXPECTED_SOURCE_SHA"
+          image_tag="sha-$EXPECTED_SOURCE_SHA"
+          if [[ -n "$CONFIRMED_IMAGE_TAG" && "$CONFIRMED_IMAGE_TAG" != "$image_tag" ]]; then
+            echo "image_tag must be empty or exactly $image_tag" >&2
+            exit 1
+          fi
+          if [[ "$APPLY_MIGRATIONS" == "true" ]]; then
+            [[ "$BACKUP_REFERENCE" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "A safe backup_reference is required." >&2; exit 1; }
+          else
+            test -z "$BACKUP_REFERENCE" || { echo "backup_reference must be empty when migrations are disabled." >&2; exit 1; }
+          fi
+          [[ "$GHCR_IMAGE" =~ ^ghcr\.io/[A-Za-z0-9._/-]+$ ]] || { echo "GHCR_IMAGE is missing or invalid." >&2; exit 1; }
+          [[ "$ORACLE_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || { echo "ORACLE_HOST is missing or invalid." >&2; exit 1; }
+          [[ "$ORACLE_SSH_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]] || { echo "ORACLE_SSH_USER is missing or invalid." >&2; exit 1; }
+          test "$ORACLE_DEPLOY_PATH" = "/opt/careersignals" || { echo "ORACLE_DEPLOY_PATH must be exactly /opt/careersignals." >&2; exit 1; }
+          echo "source_sha=$EXPECTED_SOURCE_SHA" >> "$GITHUB_OUTPUT"
+          echo "image_tag=$image_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Install backend dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.lock
+
+      - name: Run backend tests with skip reporting
+        run: python -m pytest -ra
+
+      - name: Resolve dbt dependencies and compile locally
+        env:
+          DBT_TARGET: local
+        run: |
+          set -euo pipefail
+          mkdir -p data/local
+          cd dbt
+          dbt deps --project-dir . --profiles-dir .
+          dbt compile --project-dir . --profiles-dir . --target local
+
+      - name: Parse the production dbt target without production access
+        env:
+          DBT_TARGET: prod
+          MOTHERDUCK_TOKEN: validation-placeholder
+          MOTHERDUCK_DATABASE: CareerSignal
+        run: |
+          set -euo pipefail
+          cd dbt
+          dbt parse --project-dir . --profiles-dir . --target prod --no-partial-parse
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Refuse to overwrite an existing source-SHA image tag
+        env:
+          IMAGE_TAG: ${{ steps.source.outputs.image_tag }}
+        run: |
+          set -euo pipefail
+          set +e
+          inspect_output="$(docker buildx imagetools inspect "$GHCR_IMAGE:$IMAGE_TAG" 2>&1)"
+          inspect_status=$?
+          set -e
+          if [[ "$inspect_status" == "0" ]]; then
+            echo "Immutable image tag $IMAGE_TAG already exists; refusing to overwrite it." >&2
+            exit 1
+          fi
+          if ! grep -Eiq '(not found|manifest unknown|no such manifest)' <<<"$inspect_output"; then
+            echo "Unable to prove that the immutable image tag is unused; refusing to push." >&2
+            exit 1
+          fi
+
+      - name: Build and push immutable ARM64 image
+        id: image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: ${{ env.GHCR_IMAGE }}:${{ steps.source.outputs.image_tag }}
+          build-args: SOURCE_COMMIT_SHA=${{ steps.source.outputs.source_sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/swiftaihub/CareerSignals
+            org.opencontainers.image.revision=${{ steps.source.outputs.source_sha }}
+          provenance: true
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Prepare pinned SSH host verification
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.ORACLE_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.ORACLE_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$SSH_PRIVATE_KEY" || { echo "ORACLE_SSH_PRIVATE_KEY is missing." >&2; exit 1; }
+          test -n "$SSH_KNOWN_HOSTS" || { echo "ORACLE_SSH_KNOWN_HOSTS is missing." >&2; exit 1; }
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"
+
+      - name: Package non-secret release definitions
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          mkdir release-bundle
+          cp docker-compose.production.yml SOURCE_MANIFEST.json supabase-cli.version release-bundle/
+          cp -R reverse-proxy scripts systemd supabase release-bundle/
+          tar -C release-bundle -czf "release-$SOURCE_SHA.tar.gz" .
+
+      - name: Deploy the atomic application release to Oracle
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          APPLY_MIGRATIONS: ${{ inputs.apply_migrations }}
+          BACKUP_REFERENCE: ${{ inputs.backup_reference }}
+        run: |
+          set -euo pipefail
+          [[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+            echo "The build did not return a valid immutable image digest." >&2
+            exit 1
+          }
+          image_ref="$GHCR_IMAGE@$IMAGE_DIGEST"
+          remote="$ORACLE_SSH_USER@$ORACLE_HOST"
+          archive="release-$SOURCE_SHA.tar.gz"
+          helper=/usr/local/sbin/careersignals-install-release
+          local_helper_hash="$(sha256sum scripts/install-release.sh | awk '{print $1}')"
+          remote_helper_hash="$(ssh -o BatchMode=yes "$remote" sha256sum "$helper" | awk '{print $1}')"
+          remote_helper_metadata="$(ssh -o BatchMode=yes "$remote" stat -c '%U:%G %a' "$helper")"
+          test "$remote_helper_hash" = "$local_helper_hash" || {
+            echo "The root-owned Oracle installer does not match this reviewed release; owner update is required." >&2
+            exit 1
+          }
+          test "$remote_helper_metadata" = "root:root 755" || {
+            echo "The Oracle installer must be root:root mode 755." >&2
+            exit 1
+          }
+          cleanup_remote() {
+            ssh -o BatchMode=yes "$remote" rm -f "/tmp/$archive" >/dev/null 2>&1 || true
+          }
+          trap cleanup_remote EXIT
+          scp -o BatchMode=yes "$archive" "$remote:/tmp/"
+          ssh -o BatchMode=yes "$remote" \
+            sudo -- "$helper" \
+            "$ORACLE_DEPLOY_PATH" "$SOURCE_SHA" "/tmp/$archive" "$image_ref" \
+            "$APPLY_MIGRATIONS" "$BACKUP_REFERENCE"
+
+      - name: Verify public API health
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          health_json="$(curl --fail --silent --show-error --max-time 20 https://careersignals-api.swiftaihub.com/api/health)"
+          HEALTH_JSON="$health_json" python - <<'PY'
+          import json
+          import os
+
+          health = json.loads(os.environ["HEALTH_JSON"])
+          if health.get("status") != "ok" or health.get("source_commit_sha") != os.environ["SOURCE_SHA"]:
+              raise SystemExit("Public API health did not report the deployed source SHA.")
+          PY
+
+      - name: Record immutable deployment result
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+          IMAGE_TAG: ${{ steps.source.outputs.image_tag }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### CareerSignals backend deployment"
+            echo "- Source SHA: $SOURCE_SHA"
+            echo "- Image tag: $IMAGE_TAG"
+            echo "- Image digest: $IMAGE_DIGEST"
+            echo "- API deployed: true"
+            echo "- Worker deployed: true"
+            echo "- Scheduler deployed: true"
+            echo "- Migrations requested: ${{ inputs.apply_migrations }}"
+          } >> "$GITHUB_STEP_SUMMARY"

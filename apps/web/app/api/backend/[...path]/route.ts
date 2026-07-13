@@ -1,7 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { getServerAuthorization } from "@/lib/auth";
-import { backendPathFromSegments } from "@/lib/backend-policy";
+import {
+  backendPathFromSegments,
+  safeBackendRedirectLocation
+} from "@/lib/backend-policy";
 import { getBackendBaseUrl } from "@/lib/backend";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +32,16 @@ async function forward(request: NextRequest, context: RouteContext) {
     );
   }
 
-  const target = new URL(`${getBackendBaseUrl()}${encodedPath}`);
+  let backendBaseUrl: string;
+  try {
+    backendBaseUrl = getBackendBaseUrl();
+  } catch {
+    return NextResponse.json(
+      { detail: "The CareerSignals service is not configured.", error_code: "API_NOT_CONFIGURED" },
+      { status: 503 }
+    );
+  }
+  const target = new URL(`${backendBaseUrl}${encodedPath}`);
   request.nextUrl.searchParams.forEach((value, key) => target.searchParams.append(key, value));
 
   const headers = new Headers();
@@ -56,12 +68,31 @@ async function forward(request: NextRequest, context: RouteContext) {
       redirect: "manual"
     });
     const responseHeaders = new Headers();
-    for (const name of ["content-type", "content-disposition", "cache-control", "location", "x-request-id"]) {
+    for (const name of ["content-type", "content-disposition", "cache-control", "x-request-id"]) {
       const value = upstream.headers.get(name);
       if (value) responseHeaders.set(name, value);
     }
-    const setCookie = upstream.headers.get("set-cookie");
-    if (setCookie) responseHeaders.set("set-cookie", setCookie);
+
+    if (upstream.status >= 300 && upstream.status < 400 && upstream.status !== 304) {
+      const location = safeBackendRedirectLocation(
+        upstream.headers.get("location"),
+        backendBaseUrl
+      );
+      if (!location) {
+        return NextResponse.json(
+          {
+            detail: "The backend returned an unsafe redirect.",
+            error_code: "UPSTREAM_REDIRECT_REJECTED"
+          },
+          { status: 502 }
+        );
+      }
+      responseHeaders.set("location", location);
+    }
+
+    // Backend cookies are never browser session state. Relaying Set-Cookie
+    // could create host-wide or unscoped cookies, so the BFF intentionally
+    // drops them.
 
     return new NextResponse(upstream.body, {
       status: upstream.status,

@@ -18,6 +18,10 @@ Before applying to a shared environment:
    desired. Set the backend `DEMO_USER_UUID` to
    `00000000-0000-4000-8000-000000000020`.
 
+The guarded production workflow additionally runs `scripts/production_schema_smoke.py` after `supabase db push`. It requires all 25 reviewed public tables to have RLS enabled and forced, the exact 30-name active public-policy inventory, and reviewed minimum table, authenticated-role, command, permissive-mode, and expression invariants. This is a catalog check only, not an exact semantic proof of every policy expression. It does not execute as two real users, Demo, Admin, or anonymous and therefore never replaces step 4 or the live application authorization suite.
+
+The Supabase CLI accepts the direct database URL through `--db-url`, so it can appear in process arguments. On the dedicated migration host, restrict logins, avoid broad process-list diagnostics during the operation, and consider an OS-reviewed `/proc` policy such as `hidepid=2` only after testing Docker and monitoring compatibility. Rotate the database credential if process-argument exposure is suspected.
+
 The Demo seed creates no Auth user and no password. It inserts a fixed
 application profile, one completed result partition, exactly 20 current Demo
 matches, and deterministic summary rows. The API must issue its own signed,

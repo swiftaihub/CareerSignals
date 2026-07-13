@@ -7,6 +7,7 @@ import logging
 from apscheduler.events import EVENT_JOB_EXECUTED, JobExecutionEvent
 from apscheduler.schedulers.blocking import BlockingScheduler
 
+from packages.careersignal_core.heartbeat import FileHeartbeat
 from packages.careersignal_core.repositories.connector_runs import ConnectorRunRepository
 from packages.careersignal_core.scheduling import (
     ConnectorRefreshSchedule,
@@ -81,9 +82,10 @@ def build_scheduler(
 
 def main() -> None:
     settings = get_settings()
-    settings.require_api_configuration()
+    settings.require_scheduler_configuration()
     logging.basicConfig(level=settings.log_level)
-    build_scheduler().start()
+    with FileHeartbeat.from_environment():
+        build_scheduler().start()
 
 
 if __name__ == "__main__":

@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { withBasePath } from "@/lib/app-path";
 
 import { HOW_IT_WORKS_STEPS } from "./home-content";
 
@@ -75,7 +76,7 @@ export function HowItWorksSection() {
                 height={929}
                 loading="lazy"
                 sizes="(max-width: 1023px) 94vw, 51vw"
-                src="/illustrations/personal-matching-flow.webp"
+                src={withBasePath("/illustrations/personal-matching-flow.webp")}
                 width={1693}
               />
               <div className="story-progress" style={{ "--story-progress": `${((activeStep + 1) / 4) * 100}%` } as CSSProperties}>

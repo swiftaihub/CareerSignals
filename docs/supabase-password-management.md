@@ -7,11 +7,12 @@ CareerSignals uses Supabase Auth for password recovery and authenticated passwor
 Set the following values in the Next.js deployment environment (not in committed `.env` files):
 
 ```dotenv
-NEXT_PUBLIC_SITE_URL=https://app.example.com
+NEXT_PUBLIC_SITE_ORIGIN=https://jobs.swiftaihub.com
+NEXT_PUBLIC_BASE_PATH=/careersignals
 PASSWORD_RECOVERY_COOKIE_SECRET=<unique random value of at least 32 bytes>
 ```
 
-`NEXT_PUBLIC_SITE_URL` is trusted configuration used to create recovery callback URLs. Production values must use HTTPS. `PASSWORD_RECOVERY_COOKIE_SECRET` is server-only and signs the short-lived recovery-intent cookie; never expose it to browser code.
+The trusted production application URL is derived as `NEXT_PUBLIC_SITE_ORIGIN + NEXT_PUBLIC_BASE_PATH`, yielding `https://jobs.swiftaihub.com/careersignals`. The origin must use HTTPS in production and must not contain a path. `PASSWORD_RECOVERY_COOKIE_SECRET` is server-only and signs the short-lived recovery-intent cookie; store it once as a Cloudflare Worker Secret and never expose it to browser code.
 
 The existing `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` remain the only Supabase values used by the web application. Never add a service-role key, Supabase Management API token, SMTP password, or production secret to the repository.
 
@@ -19,14 +20,15 @@ The existing `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KE
 
 In the Supabase Dashboard, open **Authentication → URL Configuration**.
 
-1. Set **Site URL** to the canonical production origin, for example `https://app.example.com`.
+1. Set **Site URL** to `https://jobs.swiftaihub.com/careersignals`.
 2. Add every supported callback to **Redirect URLs** using exact URLs where possible:
 
    - Local development: `http://localhost:3000/auth/callback`
-   - Production: `https://app.example.com/auth/callback`
+   - Production-equivalent local development: `http://localhost:3000/careersignals/auth/callback`
+   - Production: `https://jobs.swiftaihub.com/careersignals/auth/callback`
    - Add explicit staging/preview callbacks only for environments that are intentionally supported.
 
-The application calls `resetPasswordForEmail` with a trusted callback ending in `/auth/callback?next=/reset-password`. It does not construct production email links from a request `Host` header. Supabase must allow the callback URL or it will fall back to the configured Site URL.
+The application calls `resetPasswordForEmail` with a trusted callback ending in `/careersignals/auth/callback?next=/reset-password` in production. It does not construct production email links from a request `Host` header. The callback validates `next` as an internal logical path and resolves recovery only to `/careersignals/reset-password`; external hosts and duplicate/missing base paths are rejected. Supabase must allow the callback URL or it will fall back to the configured Site URL.
 
 ## Require the current password
 
@@ -90,9 +92,9 @@ Store SMTP credentials only in Supabase’s protected Dashboard configuration or
 Before production rollout:
 
 1. Request a reset for both a registered and an unregistered syntactically valid email and verify the UI response is identical.
-2. Open a current recovery email in the same browser that requested it and confirm it reaches `/reset-password`.
+2. Open a current recovery email in the same browser that requested it and confirm it reaches `/careersignals/reset-password` in the production-equivalent build.
 3. Confirm expired and reused links return to the friendly request-new-link state.
-4. While a recovery session is active, try `/dashboard`, `/settings`, and application API routes; each must be blocked or redirected to `/reset-password`.
+4. While a recovery session is active, try the Dashboard, Settings, and application API routes; each must be blocked or redirected to the base-path-aware reset-password route.
 5. Reset a disposable account, then verify the old password fails, the new password succeeds, and existing refresh-token sessions are revoked.
 6. In Settings, verify an incorrect current password fails and a correct current password changes the password, signs the user out, and requires the new password at the next login.
 7. Verify the demo account shows the disabled password-change control.

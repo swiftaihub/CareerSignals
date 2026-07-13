@@ -52,6 +52,16 @@ from src.utils.progress import ProgressReporter
 LOGGER = logging.getLogger(__name__)
 
 
+class SharedConnectorRefreshError(RuntimeError):
+    """Raised with a credential-safe summary at the pipeline boundary."""
+
+
+def _safe_failure_summary(exc: BaseException, message: str) -> str:
+    """Describe a failure without including exception-controlled text."""
+
+    return f"{type(exc).__name__}: {message}"
+
+
 def _uses_motherduck_analytics(mode: str) -> bool:
     """Return whether the shared bridge must feed the MotherDuck dbt target.
 
@@ -62,10 +72,8 @@ def _uses_motherduck_analytics(mode: str) -> bool:
 
     if mode == "motherduck":
         return True
-    return (
-        os.getenv("DBT_TARGET", "").strip().casefold() == "dev"
-        and bool(os.getenv("MOTHERDUCK_TOKEN", "").strip())
-    )
+    target = os.getenv("DBT_TARGET", "").strip().casefold()
+    return target in {"dev", "prod"} and bool(os.getenv("MOTHERDUCK_TOKEN", "").strip())
 
 
 def source_names_from_config(configs: ConfigBundle) -> list[str]:
@@ -353,17 +361,18 @@ def collect_connector_jobs(
                     if policy.backoff_seconds:
                         time.sleep(policy.backoff_seconds * attempt)
                     continue
-                LOGGER.exception(
-                    "Connector %s failed for category %s",
+                LOGGER.error(
+                    "Connector %s failed for category %s (%s)",
                     connector.source_name,
                     category.category_name,
+                    type(exc).__name__,
                 )
                 errors.append(
                     {
                         "source": connector.source_name,
                         "category_name": category.category_name,
                         "query_title": ", ".join(category.search_titles),
-                        "error_message": str(exc),
+                        "error_message": "Connector request failed.",
                         "error_type": type(exc).__name__,
                     }
                 )
@@ -609,6 +618,13 @@ def run_shared_connector_refresh(
             "jobs": shared_jobs,
         }
     except Exception as exc:
+        failure_summary = _safe_failure_summary(exc, "Shared connector refresh failed.")
         if writer:
-            writer.fail_run(run_uuid, str(exc))
-        raise
+            try:
+                writer.fail_run(run_uuid, failure_summary)
+            except Exception as record_exc:
+                LOGGER.error(
+                    "Unable to record shared connector refresh failure (%s)",
+                    type(record_exc).__name__,
+                )
+        raise SharedConnectorRefreshError(failure_summary) from None
