@@ -42,7 +42,6 @@ jobs:
     environment: production
     timeout-minutes: 45
     env:
-      SPLIT_ROOT: ${{ runner.temp }}/careersignals-deployment-split
       SOURCE_REF: ${{ inputs.source_ref }}
       TARGET_BRANCH: ${{ inputs.target_branch }}
       SYNC_WEB: ${{ inputs.sync_web }}
@@ -58,6 +57,12 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Initialize runner paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "SPLIT_ROOT=${RUNNER_TEMP}/careersignals-deployment-split" >> "$GITHUB_ENV"
 
       - name: Resolve and authorize source revision
         id: source
@@ -137,6 +142,21 @@ jobs:
           set -euo pipefail
           python scripts/deployment_split.py validate-workflow \
             .github/workflows/sync-deployment-repositories.yml
+
+      - name: Validate GitHub Actions workflows
+        shell: bash
+        env:
+          ACTIONLINT_VERSION: 1.7.7
+        run: |
+          set -euo pipefail
+          curl -fsSL \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
+            -o "${RUNNER_TEMP}/actionlint.tar.gz"
+          tar -xzf "${RUNNER_TEMP}/actionlint.tar.gz" -C "${RUNNER_TEMP}" actionlint
+          "${RUNNER_TEMP}/actionlint" \
+            .github/workflows/*.yml \
+            deployment/web/.github/workflows/*.yml \
+            deployment/backend/.github/workflows/*.yml
 
       - name: Build and validate deterministic split trees
         shell: bash

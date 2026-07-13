@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 import subprocess
 
 import pytest
+import yaml
 
 from scripts.deployment_split import (
     MANIFEST_NAME,
@@ -35,6 +37,12 @@ jobs:
       - run: echo validated
 """
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+WORKFLOW_GLOBS = (
+    ".github/workflows/*.yml",
+    "deployment/web/.github/workflows/*.yml",
+    "deployment/backend/.github/workflows/*.yml",
+)
+RUNNER_CONTEXT_PATTERN = re.compile(r"\brunner\s*\.")
 
 
 def _write_files(root: Path, files: dict[str, str | bytes]) -> None:
@@ -89,6 +97,20 @@ def _commit_repo(tmp_path: Path, files: dict[str, str | bytes]) -> tuple[Path, s
         stdin=subprocess.DEVNULL,
     ).stdout.strip()
     return repo, sha
+
+
+def _workflow_paths() -> list[Path]:
+    paths: dict[Path, None] = {}
+    for pattern in WORKFLOW_GLOBS:
+        for path in PROJECT_ROOT.glob(pattern):
+            paths[path] = None
+    return sorted(paths)
+
+
+def _load_workflow(path: Path) -> dict[str, object]:
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert isinstance(loaded, dict), f"{path} must parse as a YAML mapping"
+    return loaded
 
 
 def _web_files() -> dict[str, str]:
@@ -287,6 +309,35 @@ def test_workflow_trigger_validation_is_manual_only(tmp_path: Path) -> None:
             validate_manual_only_workflow(unsafe)
 
 
+def test_workflows_parse_as_yaml() -> None:
+    paths = _workflow_paths()
+    assert paths
+    for path in paths:
+        _load_workflow(path)
+
+
+def test_job_level_env_does_not_use_runner_context() -> None:
+    offenders: list[str] = []
+    for path in _workflow_paths():
+        workflow = _load_workflow(path)
+        jobs = workflow.get("jobs", {})
+        assert isinstance(jobs, dict), f"{path} jobs must be a mapping"
+        for job_id, job in jobs.items():
+            if not isinstance(job, dict):
+                continue
+            env = job.get("env")
+            if env is None:
+                continue
+            assert isinstance(env, dict), f"{path} jobs.{job_id}.env must be a mapping"
+            for name, value in env.items():
+                if isinstance(value, str) and RUNNER_CONTEXT_PATTERN.search(value):
+                    offenders.append(
+                        f"{path.relative_to(PROJECT_ROOT).as_posix()} jobs.{job_id}.env.{name}"
+                    )
+
+    assert not offenders, "runner.* is unavailable in jobs.<job_id>.env: " + ", ".join(offenders)
+
+
 def test_missing_deployment_files_are_rejected(tmp_path: Path) -> None:
     empty = tmp_path / "empty"
     empty.mkdir()
@@ -330,6 +381,11 @@ def test_canonical_sync_workflow_is_manual_only_with_safe_defaults() -> None:
     assert "default: true" in dry_run_block
     assert "ref: ${{ github.sha }}" in text
     assert "ref: ${{ inputs.source_ref }}" not in text
+    assert "SPLIT_ROOT: ${{ runner.temp }}" not in text
+    assert 'echo "SPLIT_ROOT=${RUNNER_TEMP}/careersignals-deployment-split" >> "$GITHUB_ENV"' in text
+    assert "Validate GitHub Actions workflows" in text
+    for pattern in WORKFLOW_GLOBS:
+        assert pattern in text
     assert '"${TARGET_BRANCH}" == "main" && ! "${SOURCE_REF}" =~ ^[0-9a-f]{40}$' in text
     assert '"$GITHUB_REF" != "refs/heads/main"' in text
     assert 'git merge-base --is-ancestor "$workflow_sha" origin/main' in text
