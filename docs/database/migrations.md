@@ -1,7 +1,7 @@
 # Database migrations and rollback
 
 CareerSignals uses an ordered, forward-only Supabase migration stack in
-`supabase/migrations`. The sixteen files must be applied in numeric order. They
+`supabase/migrations`. The eighteen files must be applied in numeric order. They
 create the PostgreSQL control plane, serving tables, helper functions, RLS,
 constraints, and indexes. No migration or seed contains credentials.
 
@@ -28,6 +28,30 @@ empty override documents. It never accepts role or account status from Auth
 metadata. Activation, entitlement adjustment, suspension, and deletion remain
 audited backend service operations.
 
+## Dashboard analytics contract
+
+`GET /api/dashboard/summary?days=30` returns the latest authoritative funnel
+snapshot and an indexed daily history window. `days` is restricted to 7–365
+and identity always comes from the verified session.
+
+- **Total Global Jobs** is the distinct active shared job universe, excluding
+  fixed `demo_seed` fixtures. Only the aggregate count is returned.
+- **Jobs for You** is the authenticated tenant's distinct current
+  `user_job_matches` partition, matching the Jobs page serving semantics.
+- **Applied Jobs** is the distinct set that currently is, or has an immutable
+  transition to/from, Applied, Interview, Rejected, or Offer.
+- **Interviews** is the distinct set that currently is, or has an immutable
+  transition to/from, Interview or Offer. A later Rejected or Archived state
+  does not remove a known interview.
+- Archived never qualifies on its own; only trustworthy earlier status events
+  can make it count as applied or interviewed.
+
+The migration writes one reliable current-day snapshot and does not synthesize
+older history. Within an API window, a known end-of-day value carries forward
+until the next snapshot. Dates for which every series is unknown are omitted,
+never fabricated as zeroes. The fixed Demo tenant derives both global and
+personal history from its own 20-job fixture partition.
+
 ## Important invariants
 
 - `auth.users.id` maps to a stable `user_profiles.user_uuid`; clients never
@@ -47,6 +71,9 @@ audited backend service operations.
   personal runs retain that bundle UUID in addition to their immutable JSON
   snapshot; legacy runs remain valid with a null bundle reference.
 - RLS is enabled and forced on every application/control-plane table.
+- Dashboard job-search analytics read indexed daily snapshots; application
+  status transitions are immutable and tenant-scoped. Dates before the first
+  reliable snapshot remain unknown rather than being backfilled with zeros.
 - Demo rows have a service-role-resistant trigger guard. Only the transaction-
   local seed override in the deterministic seed may write them.
 - Connector internal error fields are Admin/service-only; user-facing freshness

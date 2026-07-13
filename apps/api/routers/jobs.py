@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from apps.api.dependencies.authorization import CurrentUser, require_non_demo_user
 from apps.api.dependencies.repositories import get_repository
-from apps.api.schemas.jobs import JobStatusUpdate
+from apps.api.schemas.jobs import DashboardSummary, JobStatusUpdate
 from packages.careersignal_core.repositories.jobs import (
     APPLICATION_STATUSES,
     JobFilters,
@@ -146,6 +146,9 @@ def get_data_status(repository: JobRepository = Depends(get_repository)) -> dict
     return repository.get_status()
 
 
-@router.get("/dashboard/summary")
-def get_dashboard_summary(repository: JobRepository = Depends(get_repository)) -> dict[str, Any]:
-    return repository.get_dashboard_summary()
+@router.get("/dashboard/summary", response_model=DashboardSummary)
+def get_dashboard_summary(
+    days: int = Query(default=30, ge=7, le=365),
+    repository: JobRepository = Depends(get_repository),
+) -> DashboardSummary:
+    return DashboardSummary.model_validate(repository.get_dashboard_summary(days=days))

@@ -15,6 +15,9 @@ from uuid import UUID, uuid5
 
 from psycopg.types.json import Jsonb
 
+from packages.careersignal_core.repositories.dashboard_analytics import (
+    DashboardAnalyticsRepository,
+)
 from packages.careersignal_core.settings import get_settings, project_root
 from packages.careersignal_core.storage.postgres import PostgresStore
 
@@ -52,8 +55,15 @@ def seed_demo(*, demo_user_uuid: str | None = None) -> dict[str, Any]:
     jobs = _load_jobs(project_root() / "data" / "demo" / "demo_jobs.json")
     now = datetime.now(timezone.utc)
     store = PostgresStore()
+    analytics_repository = DashboardAnalyticsRepository(store)
 
     with store.transaction() as connection:
+        connection.execute("select set_config('careersignals.allow_demo_seed', 'on', true)")
+        connection.execute("select set_config('careersignals.config_change_source', 'demo_seed', true)")
+        connection.execute(
+            "select set_config('careersignals.changed_by_user_uuid', %s, true)",
+            [user_uuid],
+        )
         connection.execute(
             """
             insert into public.user_profiles (
@@ -112,6 +122,7 @@ def seed_demo(*, demo_user_uuid: str | None = None) -> dict[str, Any]:
                   %s, %s, %s, %s, %s, %s, %s, %s, %s, true, now()
                 )
                 on conflict (job_id) do update set
+                  source_name = excluded.source_name, source_job_id = excluded.source_job_id,
                   title = excluded.title, company_name = excluded.company_name,
                   location = excluded.location, location_group = excluded.location_group,
                   industry = excluded.industry, seniority = excluded.seniority,
@@ -123,7 +134,7 @@ def seed_demo(*, demo_user_uuid: str | None = None) -> dict[str, Any]:
                   last_seen_at = excluded.last_seen_at, is_active = true, updated_at = now()
                 """,
                 [
-                    job["job_id"], job["source_name"], job["source_job_id"], job["title"],
+                    job["job_id"], "demo_seed", job["source_job_id"], job["title"],
                     job["company_name"], job["location"], job["location_group"], job["industry"],
                     job["seniority"], job["work_arrangement"], job["visa_signal"],
                     job["salary_min"], job["salary_max"], job["salary_currency"], job["posted_at"],
@@ -193,6 +204,11 @@ def seed_demo(*, demo_user_uuid: str | None = None) -> dict[str, Any]:
             where user_uuid = %s
             """,
             [run_uuid, user_uuid],
+        )
+        analytics_repository.record_user_snapshot(
+            user_uuid=user_uuid,
+            personal_run_uuid=run_uuid,
+            connection=connection,
         )
     return {"user_uuid": user_uuid, "run_uuid": run_uuid, "jobs": 20}
 

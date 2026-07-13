@@ -10,6 +10,9 @@ from uuid import UUID
 
 from psycopg.types.json import Jsonb
 
+from packages.careersignal_core.repositories.dashboard_analytics import (
+    DashboardAnalyticsRepository,
+)
 from packages.careersignal_core.storage.postgres import PostgresStore
 
 
@@ -99,8 +102,15 @@ def _require_unique_natural_key(
 
 
 class UserResultsPublisher:
-    def __init__(self, store: PostgresStore | None = None) -> None:
+    def __init__(
+        self,
+        store: PostgresStore | None = None,
+        analytics_repository: DashboardAnalyticsRepository | None = None,
+    ) -> None:
         self.store = store or PostgresStore()
+        self.analytics_repository = analytics_repository or DashboardAnalyticsRepository(
+            self.store
+        )
 
     def publish_user_results(
         self,
@@ -444,6 +454,11 @@ class UserResultsPublisher:
                 ) values (%s, %s, 'info', 'published', 'Pipeline results published atomically')
                 """,
                 [run_key, user_key],
+            )
+            self.analytics_repository.record_user_snapshot(
+                user_uuid=user_key,
+                personal_run_uuid=run_key,
+                connection=connection,
             )
 
         return {

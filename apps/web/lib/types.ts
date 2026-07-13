@@ -186,6 +186,26 @@ export interface DistributionRow {
   count: number;
 }
 
+export interface DashboardFunnel {
+  total_global_jobs: number;
+  total_user_jobs: number;
+  total_applied_jobs: number;
+  total_interviews: number;
+}
+
+export interface JobCountTimeSeriesPoint {
+  date: string;
+  global_jobs: number | null;
+  user_jobs: number | null;
+  applied_jobs: number | null;
+}
+
+export interface AnalyticsWindow {
+  start_date: string;
+  end_date: string;
+  days: number;
+}
+
 export interface DashboardSummary {
   data_status: DataStatus;
   metrics: {
@@ -201,6 +221,9 @@ export interface DashboardSummary {
   visa_signal_distribution: DistributionRow[];
   work_arrangement_distribution: DistributionRow[];
   match_tier_distribution: DistributionRow[];
+  funnel: DashboardFunnel;
+  job_count_timeseries: JobCountTimeSeriesPoint[];
+  analytics_window: AnalyticsWindow;
 }
 
 export interface ApiError {
