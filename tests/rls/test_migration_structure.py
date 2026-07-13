@@ -20,6 +20,8 @@ EXPECTED_MIGRATIONS = [
     "0014_cumulative_personal_results.sql",
     "0015_config_bundle_revisions.sql",
     "0016_pipeline_quota_resets.sql",
+    "0017_dashboard_job_search_analytics.sql",
+    "0018_finite_salary_metrics.sql",
 ]
 
 RLS_TABLES = {
@@ -40,6 +42,9 @@ RLS_TABLES = {
     "job_postings",
     "user_job_matches",
     "user_job_statuses",
+    "global_job_daily_metrics",
+    "user_job_daily_metrics",
+    "user_job_status_events",
     "user_category_summary",
     "user_skill_gap",
     "user_company_priority",
@@ -69,6 +74,7 @@ def test_rls_is_enabled_and_forced_for_every_table() -> None:
             "0010_rls_policies.sql",
             "0013_global_bootstrap_pipeline.sql",
             "0015_config_bundle_revisions.sql",
+            "0017_dashboard_job_search_analytics.sql",
         )
     )
     for table in RLS_TABLES:
@@ -147,6 +153,36 @@ def test_pipeline_quota_reset_marker_preserves_run_history() -> None:
     assert "add column pipeline_quota_reset_at timestamptz" in migration
     assert "user_profiles_pipeline_quota_reset_idx" in migration
     assert "delete from public.user_pipeline_runs" not in migration
+
+
+def test_dashboard_analytics_are_snapshot_backed_and_tenant_scoped() -> None:
+    migration = _sql("0017_dashboard_job_search_analytics.sql")
+
+    assert "primary key (user_uuid, metric_date)" in migration
+    assert "user_job_daily_metrics_user_date_idx" in migration
+    assert "foreign key (personal_run_uuid, user_uuid)" in migration
+    assert "foreign key (user_uuid, job_id)" in migration
+    assert "user_job_statuses_record_event" in migration
+    assert "user_job_status_events_append_only" in migration
+    assert "user_uuid = public.current_app_user_uuid()" in migration
+    assert "user_job_daily_metrics_self_or_admin_select" in migration
+    assert "user_job_status_events_self_or_admin_select" in migration
+    assert "revoke delete on table public.user_job_statuses from authenticated" in migration
+    assert "source_name <> 'demo_seed'" in migration
+    assert "on conflict (user_uuid, metric_date) do update" in migration
+    assert migration.count("pg_advisory_xact_lock") == 2
+    assert "where events.user_uuid = target_user_uuid" in migration
+    assert "events.previous_status in ('interview', 'offer')" in migration
+    assert "application journey" in migration
+
+
+def test_non_finite_salaries_are_cleaned_and_rejected() -> None:
+    migration = _sql("0018_finite_salary_metrics.sql")
+
+    assert "salary_min::text in ('nan', 'infinity', '-infinity')" in migration
+    assert "salary_max::text in ('nan', 'infinity', '-infinity')" in migration
+    assert "job_postings_salary_min_finite_check" in migration
+    assert "job_postings_salary_max_finite_check" in migration
 
 
 def test_demo_seed_is_fixed_read_only_and_has_exactly_twenty_jobs() -> None:

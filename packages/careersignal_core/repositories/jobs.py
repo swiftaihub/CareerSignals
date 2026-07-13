@@ -24,6 +24,10 @@ from packages.careersignal_core.settings import (
     output_dir,
     project_root,
 )
+from packages.careersignal_core.repositories.dashboard_analytics import (
+    DASHBOARD_TIMEZONE,
+    DashboardAnalyticsRepository,
+)
 from packages.careersignal_core.storage.motherduck import MotherDuckService
 from packages.careersignal_core.storage.postgres import PostgresStore
 from packages.careersignal_core.storage.schema import init_motherduck_schema
@@ -323,13 +327,32 @@ class JobRepository(ABC):
     def get_status(self) -> dict[str, Any]:
         raise NotImplementedError
 
-    def get_dashboard_summary(self) -> dict[str, Any]:
+    def get_dashboard_summary(self, *, days: int = 30) -> dict[str, Any]:
+        if not 7 <= days <= 365:
+            raise ValueError("days must be between 7 and 365")
         jobs_page = self.get_jobs(JobFilters(limit=5000, sort_by="match_score", sort_order="desc"))
         jobs = jobs_page.items
         total_jobs = jobs_page.total
         score_values = [_number(job.get("match_score")) for job in jobs]
         salary_values = [_number(job.get("salary_midpoint")) for job in jobs]
         top_matches = [job for job in jobs if (_number(job.get("match_score")) or 0) >= TOP_MATCH_THRESHOLD]
+
+        applied_statuses = {"applied", "interview", "rejected", "offer"}
+        interview_statuses = {"interview", "offer"}
+        applied_jobs = sum(
+            1
+            for job in jobs
+            if str(job.get("application_status") or "").strip().casefold()
+            in applied_statuses
+        )
+        interview_jobs = sum(
+            1
+            for job in jobs
+            if str(job.get("application_status") or "").strip().casefold()
+            in interview_statuses
+        )
+        end_date = datetime.now(DASHBOARD_TIMEZONE).date()
+        start_date = end_date - timedelta(days=days - 1)
 
         return {
             "data_status": self.get_status(),
@@ -354,6 +377,20 @@ class JobRepository(ABC):
             "visa_signal_distribution": _distribution(jobs, "visa_signal"),
             "work_arrangement_distribution": _distribution(jobs, "work_arrangement"),
             "match_tier_distribution": _distribution(jobs, "match_tier"),
+            "funnel": {
+                "total_global_jobs": total_jobs,
+                "total_user_jobs": total_jobs,
+                "total_applied_jobs": applied_jobs,
+                "total_interviews": interview_jobs,
+            },
+            # Local and legacy MotherDuck modes have no trustworthy historical
+            # snapshots. An empty series is preferable to invented daily data.
+            "job_count_timeseries": [],
+            "analytics_window": {
+                "start_date": start_date,
+                "end_date": end_date,
+                "days": days,
+            },
         }
 
 
@@ -1401,11 +1438,19 @@ class MotherDuckJobRepository(JobRepository):
 class PostgresJobRepository(JobRepository):
     """Tenant-scoped serving repository backed by PostgreSQL current partitions."""
 
-    def __init__(self, user_uuid: str, store: PostgresStore | None = None) -> None:
+    def __init__(
+        self,
+        user_uuid: str,
+        store: PostgresStore | None = None,
+        *,
+        is_demo: bool = False,
+    ) -> None:
         if not user_uuid:
             raise ValueError("A verified user UUID is required")
         self.user_uuid = str(user_uuid)
         self.store = store or PostgresStore()
+        self.is_demo = is_demo
+        self.dashboard_analytics = DashboardAnalyticsRepository(self.store)
 
     @staticmethod
     def _status_display_sql() -> str:
@@ -1573,29 +1618,165 @@ class PostgresJobRepository(JobRepository):
         notes: str | None = None,
         user_id: str | None = None,
     ) -> dict[str, Any]:
-        if self.get_job(job_id) is None:
-            raise KeyError(job_id)
         stored_status = APPLICATION_STATUS_STORAGE.get(application_status.strip().casefold())
         if stored_status is None:
             raise ValueError(f"Unsupported application status: {application_status}")
-        row = self.store.fetch_one(
-            """
-            insert into public.user_job_statuses (
-              user_uuid, job_id, application_status, notes, updated_at
-            ) values (%s, %s, %s, %s, now())
-            on conflict (user_uuid, job_id) do update set
-              application_status = excluded.application_status,
-              notes = excluded.notes,
-              updated_at = now()
-            returning job_id,
-              case application_status when 'not_started' then 'Not Applied'
-                   else initcap(application_status) end as application_status,
-              notes, updated_at
-            """,
-            [self.user_uuid, job_id, stored_status, notes],
-        )
+        with self.store.transaction() as connection:
+            owned_match = connection.execute(
+                """
+                select 1
+                from public.user_job_matches
+                where user_uuid = %s::uuid
+                  and job_id = %s
+                  and is_current = true
+                limit 1
+                """,
+                [self.user_uuid, job_id],
+            ).fetchone()
+            if owned_match is None:
+                raise KeyError(job_id)
+            row = connection.execute(
+                """
+                insert into public.user_job_statuses (
+                  user_uuid, job_id, application_status, notes, updated_at
+                ) values (%s::uuid, %s, %s, %s, now())
+                on conflict (user_uuid, job_id) do update set
+                  application_status = excluded.application_status,
+                  notes = excluded.notes,
+                  updated_at = now()
+                returning job_id,
+                  case application_status when 'not_started' then 'Not Applied'
+                       else initcap(application_status) end as application_status,
+                  notes, updated_at
+                """,
+                [self.user_uuid, job_id, stored_status, notes],
+            ).fetchone()
         assert row is not None
-        return row
+        return dict(row)
+
+    def get_dashboard_summary(self, *, days: int = 30) -> dict[str, Any]:
+        if not 7 <= days <= 365:
+            raise ValueError("days must be between 7 and 365")
+        aggregate = self.store.fetch_one(
+            """
+            select
+                count(distinct matches.job_id)::integer as total_jobs,
+                count(distinct matches.job_id) filter (
+                    where matches.match_score >= %s
+                )::integer as top_matches,
+                round(avg(matches.match_score), 1) as average_match_score,
+                round(avg(
+                    case
+                        when jobs.salary_min is not null
+                          and jobs.salary_min::text not in ('NaN', 'Infinity', '-Infinity')
+                          and jobs.salary_max is not null
+                          and jobs.salary_max::text not in ('NaN', 'Infinity', '-Infinity')
+                            then (jobs.salary_min + jobs.salary_max) / 2.0
+                        else coalesce(
+                            case
+                                when jobs.salary_min::text not in ('NaN', 'Infinity', '-Infinity')
+                                    then jobs.salary_min
+                            end,
+                            case
+                                when jobs.salary_max::text not in ('NaN', 'Infinity', '-Infinity')
+                                    then jobs.salary_max
+                            end
+                        )
+                    end
+                ), 1) as average_salary_midpoint,
+                count(distinct matches.job_id) filter (
+                    where lower(coalesce(jobs.work_arrangement, '')) in ('remote', 'hybrid')
+                )::integer as remote_or_hybrid_roles,
+                count(distinct matches.job_id) filter (
+                    where lower(coalesce(jobs.visa_signal, '')) in ('positive', 'unknown', '')
+                )::integer as positive_or_unknown_visa_roles
+            from public.user_job_matches as matches
+            join public.job_postings as jobs on jobs.job_id = matches.job_id
+            where matches.user_uuid = %s::uuid
+              and matches.is_current = true
+            """,
+            [TOP_MATCH_THRESHOLD, self.user_uuid],
+        ) or {}
+        distribution_rows = self.store.fetch_all(
+            """
+            with scoped as (
+                select
+                    coalesce(nullif(btrim(jobs.visa_signal), ''), 'Unknown') as visa_signal,
+                    coalesce(nullif(btrim(jobs.work_arrangement), ''), 'Unknown') as work_arrangement,
+                    case
+                        when matches.match_score >= 90 then 'Excellent Match'
+                        when matches.match_score >= 80 then 'Strong Match'
+                        when matches.match_score >= 70 then 'Good Match'
+                        else 'Low Priority'
+                    end as match_tier
+                from public.user_job_matches as matches
+                join public.job_postings as jobs on jobs.job_id = matches.job_id
+                where matches.user_uuid = %s::uuid
+                  and matches.is_current = true
+            ), dimensions as (
+                select 'visa_signal'::text as dimension, visa_signal as label from scoped
+                union all
+                select 'work_arrangement', work_arrangement from scoped
+                union all
+                select 'match_tier', match_tier from scoped
+            )
+            select dimension, label, count(*)::integer as count
+            from dimensions
+            group by dimension, label
+            order by dimension, count desc, label
+            """,
+            [self.user_uuid],
+        )
+        distributions: dict[str, list[dict[str, Any]]] = {
+            "visa_signal": [],
+            "work_arrangement": [],
+            "match_tier": [],
+        }
+        for row in distribution_rows:
+            dimension = str(row["dimension"])
+            distributions[dimension].append(
+                {"label": str(row["label"]), "count": int(row["count"])}
+            )
+        preview_rows = self.store.fetch_all(
+            f"""
+            select *
+            from ({self._base_sql()}) as scoped
+            where match_score >= %s
+            order by match_score desc nulls last
+            limit 10
+            """,
+            [self.user_uuid, TOP_MATCH_THRESHOLD],
+        )
+        analytics = self.dashboard_analytics.get_analytics(
+            user_uuid=self.user_uuid,
+            days=days,
+            is_demo=self.is_demo,
+        )
+        return {
+            "data_status": self.get_status(),
+            "metrics": {
+                "total_jobs": int(aggregate.get("total_jobs") or 0),
+                "top_matches": int(aggregate.get("top_matches") or 0),
+                "average_match_score": _number(aggregate.get("average_match_score")),
+                "average_salary_midpoint": _number(
+                    aggregate.get("average_salary_midpoint")
+                ),
+                "remote_or_hybrid_roles": int(
+                    aggregate.get("remote_or_hybrid_roles") or 0
+                ),
+                "positive_or_unknown_visa_roles": int(
+                    aggregate.get("positive_or_unknown_visa_roles") or 0
+                ),
+            },
+            "category_summary": self.get_category_summary(),
+            "top_matches_preview": [
+                _apply_derived_fields(_normalize_record(row)) for row in preview_rows
+            ],
+            "visa_signal_distribution": distributions["visa_signal"],
+            "work_arrangement_distribution": distributions["work_arrangement"],
+            "match_tier_distribution": distributions["match_tier"],
+            **analytics.as_dict(),
+        }
 
     def get_filter_options(self) -> dict[str, list[str]]:
         rows = self.get_jobs(JobFilters(limit=5000)).items
@@ -1657,10 +1838,14 @@ class PostgresJobRepository(JobRepository):
         }
 
 
-def build_job_repository(user_uuid: str | None = None) -> JobRepository:
+def build_job_repository(
+    user_uuid: str | None = None,
+    *,
+    is_demo: bool = False,
+) -> JobRepository:
     owner = user_uuid or LEGACY_LOCAL_USER_UUID
     if data_mode() == "postgres":
-        return PostgresJobRepository(owner)
+        return PostgresJobRepository(owner, is_demo=is_demo)
     if data_mode() == "motherduck":
         return MotherDuckJobRepository(user_uuid=owner)
     return LocalJobRepository(user_uuid=owner)

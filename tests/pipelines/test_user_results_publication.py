@@ -175,6 +175,7 @@ def test_publish_merges_touched_rows_without_clearing_user_dataset() -> None:
     assert "on conflict (user_uuid, job_id, run_uuid) do update" in statements
     assert "superseded_by_personal_refresh" in statements
     assert "shared_job_inactive" in statements
+    assert "upsert_user_job_daily_metric" in statements
 
 
 def test_noop_publish_leaves_existing_current_rows_untouched() -> None:
@@ -224,3 +225,4 @@ def test_failed_publish_never_uses_global_user_result_clear() -> None:
     statements = "\n".join(statement for statement, _ in connection.statements)
 
     assert "set is_current = false where user_uuid = %s and is_current = true" not in statements
+    assert "upsert_user_job_daily_metric" not in statements

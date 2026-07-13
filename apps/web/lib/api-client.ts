@@ -286,7 +286,8 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
 }
 
 export const getMe = () => apiRequest<CurrentUser>("/api/me");
-export const getDashboardSummary = () => apiRequest<DashboardSummary>("/api/dashboard/summary");
+export const getDashboardSummary = (days = 30) =>
+  apiRequest<DashboardSummary>(`/api/dashboard/summary${paramsFrom({ days })}`);
 export const getJobs = (filters: JobFilters = {}) => apiRequest<PaginatedJobs>(`/api/jobs${paramsFrom(filters)}`);
 export const getJobFilterOptions = () => apiRequest<JobFilterOptions>("/api/jobs/filter-options");
 export const getJobFacets = () => apiRequest<JobFacets>("/api/jobs/facets");

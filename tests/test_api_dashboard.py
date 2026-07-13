@@ -308,6 +308,61 @@ def test_dashboard_summary_endpoint() -> None:
     assert payload["metrics"]["total_jobs"] == 2
     assert payload["metrics"]["top_matches"] == 1
     assert payload["data_status"]["data_mode"] == "local"
+    assert payload["funnel"] == {
+        "total_global_jobs": 2,
+        "total_user_jobs": 2,
+        "total_applied_jobs": 0,
+        "total_interviews": 0,
+    }
+    assert payload["job_count_timeseries"] == []
+    assert payload["analytics_window"]["days"] == 30
+
+
+def test_dashboard_summary_validates_and_forwards_days_without_user_override() -> None:
+    class CapturingRepository(FakeRepository):
+        def __init__(self) -> None:
+            super().__init__()
+            self.summary_days: list[int] = []
+
+        def get_dashboard_summary(self, *, days: int = 30) -> dict[str, Any]:
+            self.summary_days.append(days)
+            return super().get_dashboard_summary(days=days)
+
+    repository = CapturingRepository()
+    app.dependency_overrides[get_repository] = lambda: repository
+    client = TestClient(app)
+
+    response = client.get(
+        "/api/dashboard/summary",
+        params={
+            "days": 7,
+            # Unknown query parameters are ignored; they never reach the
+            # tenant-scoped repository method.
+            "user_uuid": "99999999-9999-4999-8999-999999999999",
+        },
+    )
+    too_short = client.get("/api/dashboard/summary", params={"days": 6})
+    too_long = client.get("/api/dashboard/summary", params={"days": 366})
+
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["analytics_window"]["days"] == 7
+    assert repository.summary_days == [7]
+    assert too_short.status_code == 422
+    assert too_long.status_code == 422
+
+
+def test_local_dashboard_funnel_includes_downstream_application_statuses() -> None:
+    repository = FakeRepository()
+    repository.jobs[0]["application_status"] = "Rejected"
+    repository.jobs[1]["application_status"] = "Offer"
+
+    summary = repository.get_dashboard_summary(days=14)
+
+    assert summary["funnel"]["total_applied_jobs"] == 2
+    assert summary["funnel"]["total_interviews"] == 1
+    assert summary["analytics_window"]["days"] == 14
 
 
 def test_local_filtering_logic() -> None:

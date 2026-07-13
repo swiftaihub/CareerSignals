@@ -16,7 +16,10 @@ from packages.careersignal_core.repositories.users import UserRepository
 
 
 def get_repository(current_user: CurrentUser = Depends(require_active_user)) -> JobRepository:
-    return build_job_repository(str(current_user.user_uuid))
+    return build_job_repository(
+        str(current_user.user_uuid),
+        is_demo=current_user.is_demo,
+    )
 
 
 def get_user_repository() -> UserRepository:

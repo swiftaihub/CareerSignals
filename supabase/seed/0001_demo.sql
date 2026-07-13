@@ -402,6 +402,35 @@ update public.user_profiles
 set last_successful_pipeline_run_uuid = '00000000-0000-4000-8000-000000000021'
 where user_uuid = '00000000-0000-4000-8000-000000000020';
 
+-- Demo analytics stays fixture-scoped. The API maps this tenant's global
+-- series to its fixed match universe instead of exposing production history.
+insert into public.user_job_daily_metrics (
+    user_uuid,
+    metric_date,
+    user_jobs_count,
+    applied_jobs_count,
+    interview_jobs_count,
+    personal_run_uuid,
+    recorded_at
+)
+select
+    '00000000-0000-4000-8000-000000000020',
+    (now() at time zone 'America/New_York')::date,
+    count(distinct matches.job_id)::integer,
+    0,
+    0,
+    '00000000-0000-4000-8000-000000000021',
+    now()
+from public.user_job_matches as matches
+where matches.user_uuid = '00000000-0000-4000-8000-000000000020'
+  and matches.is_current = true
+on conflict (user_uuid, metric_date) do update set
+    user_jobs_count = excluded.user_jobs_count,
+    applied_jobs_count = excluded.applied_jobs_count,
+    interview_jobs_count = excluded.interview_jobs_count,
+    personal_run_uuid = excluded.personal_run_uuid,
+    recorded_at = excluded.recorded_at;
+
 do $assertion$
 declare
     current_demo_jobs integer;
