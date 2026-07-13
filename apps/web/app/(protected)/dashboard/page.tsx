@@ -5,6 +5,8 @@ import Link from "next/link";
 import { BriefcaseBusiness, CircleDollarSign, Gauge, RadioTower } from "lucide-react";
 
 import { CategoryChart } from "@/components/dashboard/category-chart";
+import { JobSearchFunnel } from "@/components/dashboard/job-search-funnel";
+import { JobVolumeTrendChart } from "@/components/dashboard/job-volume-trend-chart";
 import { MatchTierChart } from "@/components/dashboard/match-tier-chart";
 import { MetricCard } from "@/components/dashboard/metric-card";
 import { VisaChart } from "@/components/dashboard/visa-chart";
@@ -17,7 +19,7 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorState } from "@/components/shared/error-state";
 import { LoadingState } from "@/components/shared/loading-state";
 import { SectionCard } from "@/components/shared/section-card";
-import { getDashboardSummary } from "@/lib/api";
+import { getDashboardSummary } from "@/lib/api-client";
 import { formatCurrency, formatDate, formatNullable, formatScore } from "@/lib/formatters";
 import type { ApiError, DashboardSummary } from "@/lib/types";
 
@@ -27,7 +29,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getDashboardSummary()
+    getDashboardSummary(30)
       .then(setSummary)
       .catch(setError)
       .finally(() => setLoading(false));
@@ -97,6 +99,22 @@ export default function DashboardPage() {
           label="Personal Results Updated"
           value={formatDate(summary.data_status.last_pipeline_run_at || summary.data_status.last_pipeline_run)}
         />
+      </div>
+
+      <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(320px,0.8fr)_minmax(0,1.6fr)]">
+        <SectionCard
+          title="Job Search Funnel"
+          description="See how your job universe converts into applications and interviews."
+        >
+          <JobSearchFunnel data={summary.funnel} />
+        </SectionCard>
+
+        <SectionCard
+          title="Job Volume Over Time"
+          description="Daily growth across the global market, your matches, and applications."
+        >
+          <JobVolumeTrendChart data={summary.job_count_timeseries} />
+        </SectionCard>
       </div>
 
       <div className="mt-6 grid gap-6 xl:grid-cols-2">

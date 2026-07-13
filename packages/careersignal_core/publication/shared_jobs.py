@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from typing import Any, Iterable, Mapping
 from uuid import UUID
 
+from packages.careersignal_core.repositories.dashboard_analytics import (
+    DashboardAnalyticsRepository,
+)
 from packages.careersignal_core.storage.postgres import PostgresStore
 
 
@@ -37,9 +41,27 @@ class SharedJobPublicationError(RuntimeError):
     pass
 
 
+def _finite_optional_number(value: Any) -> Any | None:
+    """Keep valid database numerics and discard NaN/infinite source values."""
+
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    try:
+        return value if math.isfinite(float(value)) else None
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 class SharedJobsPublisher:
-    def __init__(self, store: PostgresStore | None = None) -> None:
+    def __init__(
+        self,
+        store: PostgresStore | None = None,
+        analytics_repository: DashboardAnalyticsRepository | None = None,
+    ) -> None:
         self.store = store or PostgresStore()
+        self.analytics_repository = analytics_repository or DashboardAnalyticsRepository(
+            self.store
+        )
 
     def publish_shared_jobs(
         self,
@@ -72,6 +94,8 @@ class SharedJobsPublisher:
                 "title": row.get("title", row.get("job_title")),
                 "company_name": row.get("company_name", row.get("company")),
                 "apply_url": row.get("apply_url", row.get("jd_post_link")),
+                "salary_min": _finite_optional_number(row.get("salary_min")),
+                "salary_max": _finite_optional_number(row.get("salary_max")),
                 "salary_currency": row.get("salary_currency") or "USD",
                 "job_description_hash": row.get("job_description_hash")
                 or hashlib.sha256(description.encode("utf-8")).hexdigest(),
@@ -130,9 +154,14 @@ class SharedJobsPublisher:
                 update public.job_postings
                 set is_active = false, updated_at = now()
                 where is_active = true
+                  and source_name <> 'demo_seed'
                   and last_seen_at < now() - (%s * interval '1 day')
                   and shared_connector_run_uuid is distinct from %s
                 """,
                 [inactive_after_days, run_uuid],
+            )
+            self.analytics_repository.record_global_snapshot(
+                connector_run_uuid=run_uuid,
+                connection=connection,
             )
         return len(jobs)

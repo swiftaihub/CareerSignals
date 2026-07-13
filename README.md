@@ -110,7 +110,7 @@ supabase db push --dry-run
 supabase db push
 ```
 
-The fourteen files in `supabase/migrations/` must remain in numeric order. Validate them in a disposable project before applying them to a shared environment. Supabase CLI state under `supabase/.temp/` is intentionally ignored; reconstruct a link with `supabase link` rather than committing project metadata.
+The eighteen files in `supabase/migrations/` must remain in numeric order. Validate them in a disposable project before applying them to a shared environment. Supabase CLI state under `supabase/.temp/` is intentionally ignored; reconstruct a link with `supabase link` rather than committing project metadata.
 
 Bootstrap the first Admin only after migrations have been applied:
 
@@ -123,7 +123,7 @@ python scripts/bootstrap_admin.py
 Seed the permanent Demo tenant and its exactly 20 current matches:
 
 ```bash
-python scripts/seed_demo.py
+python -m scripts.seed_demo
 ```
 
 Set `DEMO_USER_UUID=00000000-0000-4000-8000-000000000020`. Demo login uses a short-lived FastAPI-signed token, not an `auth.users` password. The deterministic SQL equivalent is `supabase/seed/0001_demo.sql`.
