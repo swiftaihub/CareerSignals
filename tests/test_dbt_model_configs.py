@@ -46,3 +46,14 @@ def test_dbt_project_defines_fixed_shared_and_user_selectors() -> None:
 
     assert "name: shared_refresh" in selectors
     assert "name: user_refresh" in selectors
+
+
+def test_dbt_profiles_define_equivalent_motherduck_dev_and_prod_outputs() -> None:
+    for profile_path in (Path("dbt/profiles.yml"), Path("dbt/profiles.yml.example")):
+        profile = profile_path.read_text(encoding="utf-8")
+        dev_output = profile.split("    dev:\n", 1)[1].split("\n    prod:\n", 1)[0].strip()
+        prod_output = profile.split("\n    prod:\n", 1)[1].strip()
+
+        assert dev_output == prod_output
+        assert "type: duckdb" in prod_output
+        assert "motherduck_token={{ env_var('MOTHERDUCK_TOKEN') }}" in prod_output

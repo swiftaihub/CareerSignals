@@ -1,0 +1,15 @@
+node_modules/
+.next/
+.open-next/
+.wrangler/
+coverage/
+*.tsbuildinfo
+
+.env
+.env.*
+!.env.example
+
+*.pem
+*.key
+credentials.json
+service-account.json

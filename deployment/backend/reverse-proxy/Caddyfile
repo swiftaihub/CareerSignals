@@ -1,0 +1,29 @@
+{
+	admin 127.0.0.1:2019
+	servers {
+		trusted_proxies static private_ranges
+		client_ip_headers CF-Connecting-IP X-Forwarded-For
+	}
+}
+
+http://careersignals-api.swiftaihub.com {
+	redir https://careersignals-api.swiftaihub.com{uri} permanent
+}
+
+https://careersignals-api.swiftaihub.com {
+	tls /etc/caddy/tls/origin.pem /etc/caddy/tls/origin.key
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	reverse_proxy api:8000 {
+		health_uri /api/health
+		health_interval 15s
+		health_timeout 3s
+	}
+}
+

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import logging
 from types import SimpleNamespace
 from typing import Any, Iterator
 
@@ -62,6 +63,7 @@ class FakeRepository:
 class FakeBootstrapRepository:
     def __init__(self) -> None:
         self.transitions: list[str] = []
+        self.failure_messages: list[str] = []
 
     def mark_personal_running(self, **kwargs: Any) -> None:
         self.transitions.append("personal_running")
@@ -71,6 +73,7 @@ class FakeBootstrapRepository:
 
     def mark_personal_failed(self, **kwargs: Any) -> None:
         self.transitions.append("personal_failed")
+        self.failure_messages.append(kwargs["internal_error_message"])
 
 
 class FakeLocks:
@@ -118,12 +121,13 @@ def test_worker_runs_only_user_dbt_with_bound_shared_version() -> None:
     assert bootstrap.transitions == []
 
 
-def test_bootstrap_personal_failure_does_not_trigger_connectors() -> None:
+def test_bootstrap_personal_failure_does_not_trigger_connectors(caplog) -> None:
     repository = FakeRepository(bootstrap=True)
     bootstrap = FakeBootstrapRepository()
+    sensitive_text = "https://example.test/dbt?token=user-worker-secret"
 
     def user_refresh(**kwargs: Any) -> dict[str, Any]:
-        raise RuntimeError("dbt exploded")
+        raise RuntimeError(sensitive_text)
 
     worker = UserPipelineWorker(
         repository=repository,
@@ -133,11 +137,21 @@ def test_bootstrap_personal_failure_does_not_trigger_connectors() -> None:
         bootstrap_repository=bootstrap,
         worker_id="test-worker",
     )
+    caplog.set_level(
+        logging.ERROR,
+        logger="packages.careersignal_core.tasks.user_pipeline_worker",
+    )
 
     assert worker.process_one() is True
     assert repository.events == ["dbt_started"]
-    assert "RuntimeError: dbt exploded" in repository.failed[0]
+    assert repository.failed == ["RuntimeError: User pipeline execution failed."]
     assert bootstrap.transitions == ["personal_running", "personal_failed"]
+    assert bootstrap.failure_messages == [
+        "RuntimeError: User pipeline execution failed."
+    ]
+    assert sensitive_text not in caplog.text
+    assert "user-worker-secret" not in repr(repository.failed)
+    assert "user-worker-secret" not in repr(bootstrap.failure_messages)
 
 
 def test_unbound_personal_run_fails_before_user_dbt() -> None:
@@ -155,4 +169,4 @@ def test_unbound_personal_run_fails_before_user_dbt() -> None:
 
     assert worker.process_one() is True
     assert calls == []
-    assert "not bound to a successful shared refresh" in repository.failed[0]
+    assert repository.failed == ["RuntimeError: User pipeline execution failed."]

@@ -137,6 +137,23 @@ class AppSettings(BaseSettings):
         if missing:
             raise SettingsError("Missing required SaaS API settings: " + ", ".join(missing))
 
+    def require_worker_configuration(self) -> None:
+        if not self.saas_mode:
+            return
+        missing: list[str] = []
+        if not self.database_url.get_secret_value():
+            missing.append("DATABASE_URL")
+        if not self.motherduck_token.get_secret_value():
+            missing.append("MOTHERDUCK_TOKEN")
+        if missing:
+            raise SettingsError("Missing required SaaS worker settings: " + ", ".join(missing))
+
+    def require_scheduler_configuration(self) -> None:
+        if not self.saas_mode:
+            return
+        if not self.database_url.get_secret_value():
+            raise SettingsError("Missing required SaaS scheduler settings: DATABASE_URL")
+
     def require_backend_service_role(self) -> None:
         if not self.supabase_service_role_key.get_secret_value():
             raise SettingsError("SUPABASE_SERVICE_ROLE_KEY is required for this operation")

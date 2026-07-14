@@ -1,6 +1,8 @@
 import Image from "next/image";
 import { Focus, Gauge, SlidersHorizontal } from "lucide-react";
 
+import { withBasePath } from "@/lib/app-path";
+
 import { NOISE_TO_SIGNAL_VALUES } from "./home-content";
 import { SectionReveal } from "./section-reveal";
 
@@ -42,7 +44,7 @@ export function NoiseToSignalSection() {
             height={887}
             loading="lazy"
             sizes="(max-width: 1023px) 94vw, 54vw"
-            src="/illustrations/noise-to-signal.webp"
+            src={withBasePath("/illustrations/noise-to-signal.webp")}
             width={1774}
           />
         </SectionReveal>

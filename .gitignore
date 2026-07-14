@@ -152,6 +152,7 @@ activemq-data/
 # Environments
 .env
 .env.*
+!.env.example
 .envrc
 .venv
 .venv*/
@@ -234,6 +235,10 @@ outputs/*.xlsx
 # Node / Next.js local artifacts
 node_modules/
 .next/
+.open-next/
+.worker-next/
+coverage/
+*.tsbuildinfo
 apps/web/node_modules/
 apps/web/.next/
 
@@ -246,3 +251,22 @@ dbt/.user.yml
 
 # Supabase CLI linked-project and runtime state
 supabase/.temp/
+supabase/.branches/
+
+# Credentials and private key material
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+credentials.json
+service-account.json
+
+# Deployment metadata/configuration intentionally committed when generated
+!SOURCE_MANIFEST.json
+!**/SOURCE_MANIFEST.json
+!wrangler.json
+!**/wrangler.json
+!wrangler.jsonc
+!**/wrangler.jsonc

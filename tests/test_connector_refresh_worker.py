@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import logging
 
 from packages.careersignal_core.tasks.connector_refresh_worker import ConnectorRefreshWorker
 
@@ -33,6 +34,14 @@ class FakeRepository:
 class FakeConfigRepository:
     def active_user_snapshots(self):
         return []
+
+
+class FakeBootstrapRepository:
+    def get_by_connector_run(self, connector_run_uuid):
+        return None
+
+    def mark_global_running(self, *, connector_run_uuid):
+        raise AssertionError("manual runs must not update a bootstrap workflow")
 
 
 class FakeLocks:
@@ -80,6 +89,7 @@ def _worker(monkeypatch, runner):
     worker = ConnectorRefreshWorker(
         repository=repository,
         config_repository=FakeConfigRepository(),
+        bootstrap_repository=FakeBootstrapRepository(),
         locks=locks,
         settings=FakeSettings(),
         runner=runner,
@@ -129,11 +139,20 @@ def test_dbt_failure_uses_worker_lifecycle_status(monkeypatch) -> None:
     assert repository.finish_calls[0]["shared_dbt_run_completed"] is False
 
 
-def test_publication_exception_is_recorded_and_locks_are_released(monkeypatch) -> None:
+def test_publication_exception_is_recorded_and_locks_are_released(
+    monkeypatch,
+    caplog,
+) -> None:
+    sensitive_text = "https://example.test/publish?token=worker-secret"
+
     def fail_publication(**kwargs):
-        raise RuntimeError("publication unavailable")
+        raise RuntimeError(sensitive_text)
 
     worker, repository, locks = _worker(monkeypatch, fail_publication)
+    caplog.set_level(
+        logging.ERROR,
+        logger="packages.careersignal_core.tasks.connector_refresh_worker",
+    )
 
     worker.process_one()
 
@@ -142,6 +161,11 @@ def test_publication_exception_is_recorded_and_locks_are_released(monkeypatch) -
     assert repository.finish_calls[0]["public_status_message"] == (
         "The shared-data refresh was not completed."
     )
+    assert repository.finish_calls[0]["internal_error_message"] == (
+        "RuntimeError: Global connector refresh failed."
+    )
+    assert sensitive_text not in caplog.text
+    assert "worker-secret" not in repr(repository.finish_calls)
     assert locks.global_released is True
     assert locks.writer_released is True
 

@@ -4,8 +4,13 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
+import { buildAuthCallbackUrl, getCookiePath, withBasePath } from "@/lib/app-path";
 import { DEMO_TOKEN_COOKIE, getCurrentUser } from "@/lib/auth";
 import { backendFetch, readBackendError } from "@/lib/backend";
+import {
+  clearAppCookie,
+  secureAppCookieOptions
+} from "@/lib/cookie-policy";
 import { safeRedirectPath } from "@/lib/navigation";
 import {
   requestPasswordReset,
@@ -19,7 +24,7 @@ import {
   resetPasswordSchema,
   resetRequestSchema
 } from "@/lib/password-policy";
-import { trustedSiteOrigin, RECOVERY_INTENT_COOKIE_NAME } from "@/lib/password-recovery";
+import { RECOVERY_INTENT_COOKIE_NAME } from "@/lib/password-recovery";
 import {
   clearRecoveryCookies,
   getRecoveryIntentSecret,
@@ -66,10 +71,8 @@ async function createDemoSession() {
     // Demo authentication is issued and verified by FastAPI, independently of Supabase.
   }
   cookieStore.set(DEMO_TOKEN_COOKIE, payload.demo_token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
+    ...secureAppCookieOptions(),
+    path: getCookiePath(),
     expires: Number.isNaN(expiresAt.getTime()) ? undefined : expiresAt
   });
   return { error: null };
@@ -92,7 +95,7 @@ export async function loginAction(_state: AuthActionState, formData: FormData): 
     if (result.error) {
       return { error: result.error.detail, errorCode: result.error.error_code };
     }
-    redirect(safeRedirectPath(formData.get("next")));
+    redirect(withBasePath(safeRedirectPath(formData.get("next"))));
   }
 
   let response: Response;
@@ -126,8 +129,8 @@ export async function loginAction(_state: AuthActionState, formData: FormData): 
   if (error) {
     return { error: "Your session could not be established.", errorCode: "INVALID_SESSION" };
   }
-  (await cookies()).delete(DEMO_TOKEN_COOKIE);
-  redirect(safeRedirectPath(formData.get("next")));
+  clearAppCookie(await cookies(), DEMO_TOKEN_COOKIE);
+  redirect(withBasePath(safeRedirectPath(formData.get("next"))));
 }
 
 export async function registerAction(_state: AuthActionState, formData: FormData): Promise<AuthActionState> {
@@ -154,7 +157,7 @@ export async function registerAction(_state: AuthActionState, formData: FormData
     const error = await readBackendError(response);
     return { error: error.detail, errorCode: error.error_code };
   }
-  redirect("/pending?registered=1");
+  redirect(withBasePath("/pending?registered=1"));
 }
 
 export async function forgotPasswordAction(
@@ -166,12 +169,9 @@ export async function forgotPasswordAction(
     return { error: parsed.error.issues[0]?.message || "Enter a valid email address." };
   }
 
-  let siteOrigin: string;
+  let callbackUrl: string;
   try {
-    siteOrigin = trustedSiteOrigin(
-      process.env.NEXT_PUBLIC_SITE_URL,
-      process.env.NODE_ENV
-    );
+    callbackUrl = buildAuthCallbackUrl("/reset-password");
   } catch {
     return { error: "Password recovery is temporarily unavailable." };
   }
@@ -193,11 +193,9 @@ export async function forgotPasswordAction(
   }
   await clearRecoveryCookies();
 
-  const callbackUrl = new URL("/auth/callback", siteOrigin);
-  callbackUrl.searchParams.set("next", "/reset-password");
   const result = await requestPasswordReset({
     email: parsed.data.email,
-    redirectTo: callbackUrl.toString(),
+    redirectTo: callbackUrl,
     send: (email, options) => recoveryClient.auth.resetPasswordForEmail(email, options)
   });
   return result.success
@@ -255,8 +253,8 @@ export async function resetPasswordAction(
 
   await clearRecoveryCookies();
   const cookieStore = await cookies();
-  cookieStore.delete(DEMO_TOKEN_COOKIE);
-  cookieStore.delete(RECOVERY_INTENT_COOKIE_NAME);
+  clearAppCookie(cookieStore, DEMO_TOKEN_COOKIE);
+  clearAppCookie(cookieStore, RECOVERY_INTENT_COOKIE_NAME);
   try {
     const normalClient = await createClient();
     await normalClient.auth.signOut({ scope: "local" });
@@ -264,7 +262,7 @@ export async function resetPasswordAction(
     // The isolated recovery credentials are already cleared. This only removes
     // a pre-existing ordinary session from the current browser when present.
   }
-  redirect("/login?password_reset=success");
+  redirect(withBasePath("/login?password_reset=success"));
 }
 
 export async function cancelPasswordRecoveryAction() {
@@ -276,14 +274,14 @@ export async function cancelPasswordRecoveryAction() {
   }
   await clearRecoveryCookies();
   const cookieStore = await cookies();
-  cookieStore.delete(DEMO_TOKEN_COOKIE);
+  clearAppCookie(cookieStore, DEMO_TOKEN_COOKIE);
   try {
     const normalClient = await createClient();
     await normalClient.auth.signOut({ scope: "local" });
   } catch {
     // Returning to sign in must still work when Supabase is unavailable.
   }
-  redirect("/login");
+  redirect(withBasePath("/login"));
 }
 
 export async function changePasswordAction(
@@ -356,17 +354,17 @@ export async function changePasswordAction(
     // The server-side auth cookie adapter normally clears local state as part
     // of global sign-out; recovery/demo cookies are still removed explicitly.
   }
-  cookieStore.delete(DEMO_TOKEN_COOKIE);
+  clearAppCookie(cookieStore, DEMO_TOKEN_COOKIE);
   await clearRecoveryCookies();
-  redirect("/login?password_changed=success");
+  redirect(withBasePath("/login?password_changed=success"));
 }
 
 export async function demoAction() {
   const result = await createDemoSession();
   if (result.error) {
-    redirect(`/login?error=${encodeURIComponent(result.error.error_code || "DEMO_UNAVAILABLE")}`);
+    redirect(withBasePath(`/login?error=${encodeURIComponent(result.error.error_code || "DEMO_UNAVAILABLE")}`));
   }
-  redirect("/dashboard");
+  redirect(withBasePath("/dashboard"));
 }
 
 export async function logoutAction() {
@@ -380,7 +378,7 @@ export async function logoutAction() {
   }
   await clearRecoveryCookies();
   const cookieStore = await cookies();
-  cookieStore.delete(DEMO_TOKEN_COOKIE);
-  cookieStore.delete(RECOVERY_INTENT_COOKIE_NAME);
-  redirect("/");
+  clearAppCookie(cookieStore, DEMO_TOKEN_COOKIE);
+  clearAppCookie(cookieStore, RECOVERY_INTENT_COOKIE_NAME);
+  redirect(withBasePath("/"));
 }

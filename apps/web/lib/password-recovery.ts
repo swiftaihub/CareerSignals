@@ -1,6 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
-
-import { safeRedirectPath } from "./navigation";
+import { sanitizeInternalRedirect, stripBasePath } from "./app-path";
 
 export const RECOVERY_AUTH_COOKIE_NAME = "careersignals-recovery-auth";
 export const RECOVERY_INTENT_COOKIE_NAME = "careersignals-recovery-intent";
@@ -42,48 +40,11 @@ interface RecoveryIntentPayload extends RecoveryIntentIdentity {
 export type RecoveryAuthCookieKind = "session" | "code-verifier";
 
 /**
- * Returns the configured application origin after enforcing the production
- * transport policy. Request Host headers must never be used as a fallback.
- */
-export function trustedSiteOrigin(
-  configured: string | null | undefined,
-  nodeEnv: string | null | undefined
-) {
-  const candidate = configured?.trim();
-  if (
-    !candidate
-    || !/^https?:\/\//i.test(candidate)
-    || /[\\\u0000-\u001f\u007f]/.test(candidate)
-  ) {
-    throw new Error("NEXT_PUBLIC_SITE_URL must be an absolute HTTP(S) URL.");
-  }
-
-  let parsed: URL;
-  try {
-    parsed = new URL(candidate);
-  } catch {
-    throw new Error("NEXT_PUBLIC_SITE_URL must be an absolute HTTP(S) URL.");
-  }
-
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new Error("NEXT_PUBLIC_SITE_URL must use HTTP or HTTPS.");
-  }
-  if (parsed.username || parsed.password) {
-    throw new Error("NEXT_PUBLIC_SITE_URL must not contain credentials.");
-  }
-  if (nodeEnv === "production" && parsed.protocol !== "https:") {
-    throw new Error("NEXT_PUBLIC_SITE_URL must use HTTPS in production.");
-  }
-
-  return parsed.origin;
-}
-
-/**
  * Sanitizes a recovery destination and limits it to the reset page. Query and
  * fragment data are retained only when the normalized pathname is exact.
  */
 export function recoveryRedirectPath(value: unknown) {
-  const safePath = safeRedirectPath(value, RECOVERY_REDIRECT_PATH);
+  const safePath = sanitizeInternalRedirect(value, RECOVERY_REDIRECT_PATH);
 
   try {
     const parsed = new URL(safePath, TRUSTED_REDIRECT_ORIGIN);
@@ -100,12 +61,12 @@ export function recoveryRedirectPath(value: unknown) {
 }
 
 export function isRecoveryRouteAllowed(pathname: unknown) {
-  return typeof pathname === "string" && RECOVERY_ROUTES.has(pathname);
+  return typeof pathname === "string" && RECOVERY_ROUTES.has(stripBasePath(pathname));
 }
 
 export function isRecoveryIntentSecretConfigured(value: unknown): value is string {
   if (typeof value !== "string") return false;
-  return Buffer.byteLength(value, "utf8") >= MINIMUM_RECOVERY_SECRET_BYTES
+  return new TextEncoder().encode(value).byteLength >= MINIMUM_RECOVERY_SECRET_BYTES
     && !INSECURE_EXAMPLE_SECRETS.has(value.trim().toLowerCase());
 }
 
@@ -148,7 +109,8 @@ export function extractSessionId(jwt: unknown): string | null {
   }
 
   try {
-    const decoded = Buffer.from(parts[1], "base64url").toString("utf8");
+    const decoded = decodeBase64UrlText(parts[1]);
+    if (decoded === null) return null;
     const payload: unknown = JSON.parse(decoded);
     if (!isRecord(payload)) return null;
     const sessionId = payload.session_id;
@@ -158,7 +120,7 @@ export function extractSessionId(jwt: unknown): string | null {
   }
 }
 
-export function createRecoveryIntent(
+export async function createRecoveryIntent(
   identity: RecoveryIntentIdentity,
   secret: string,
   nowSeconds = currentEpochSeconds()
@@ -172,11 +134,11 @@ export function createRecoveryIntent(
     sessionId: identity.sessionId,
     expiresAt: now + RECOVERY_INTENT_COOKIE_MAX_AGE
   };
-  const encodedPayload = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
-  return `${encodedPayload}.${intentSignature(encodedPayload, secret).toString("base64url")}`;
+  const encodedPayload = encodeBase64UrlText(JSON.stringify(payload));
+  return `${encodedPayload}.${await intentSignature(encodedPayload, secret)}`;
 }
 
-export function verifyRecoveryIntent(
+export async function verifyRecoveryIntent(
   token: unknown,
   identity: RecoveryIntentIdentity,
   secret: string,
@@ -194,17 +156,18 @@ export function verifyRecoveryIntent(
   const [encodedPayload, encodedSignature] = parts;
   if (!/^[A-Za-z0-9_-]+$/.test(encodedPayload)) return false;
 
-  const expectedSignature = intentSignature(encodedPayload, secret);
   const suppliedSignature = decodeSignature(encodedSignature);
-  const comparableSignature = suppliedSignature?.length === expectedSignature.length
-    ? suppliedSignature
-    : Buffer.alloc(expectedSignature.length);
-  const signatureMatches = timingSafeEqual(expectedSignature, comparableSignature)
-    && suppliedSignature?.length === expectedSignature.length;
+  if (!suppliedSignature) return false;
+  const signatureMatches = await verifyIntentSignature(
+    encodedPayload,
+    suppliedSignature,
+    secret
+  );
   if (!signatureMatches) return false;
 
   try {
-    const decoded = Buffer.from(encodedPayload, "base64url").toString("utf8");
+    const decoded = decodeBase64UrlText(encodedPayload);
+    if (decoded === null) return false;
     const payload: unknown = JSON.parse(decoded);
     if (!isRecoveryIntentPayload(payload)) return false;
     return payload.userId === identity.userId
@@ -250,15 +213,77 @@ function assertIdentity(identity: RecoveryIntentIdentity) {
   }
 }
 
-function intentSignature(encodedPayload: string, secret: string) {
-  return createHmac("sha256", secret).update(encodedPayload, "utf8").digest();
+async function intentSignature(encodedPayload: string, secret: string) {
+  const key = await recoveryHmacKey(secret, ["sign"]);
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(encodedPayload)
+  );
+  return encodeBase64UrlBytes(new Uint8Array(signature));
+}
+
+async function verifyIntentSignature(
+  encodedPayload: string,
+  signature: Uint8Array,
+  secret: string
+) {
+  const key = await recoveryHmacKey(secret, ["verify"]);
+  const signatureBytes = new Uint8Array(signature.byteLength);
+  signatureBytes.set(signature);
+  return crypto.subtle.verify(
+    "HMAC",
+    key,
+    signatureBytes,
+    new TextEncoder().encode(encodedPayload)
+  );
+}
+
+function recoveryHmacKey(secret: string, usages: KeyUsage[]) {
+  return crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    usages
+  );
 }
 
 function decodeSignature(value: string) {
+  return decodeBase64UrlBytes(value);
+}
+
+function encodeBase64UrlText(value: string) {
+  return encodeBase64UrlBytes(new TextEncoder().encode(value));
+}
+
+function decodeBase64UrlText(value: string) {
+  const bytes = decodeBase64UrlBytes(value);
+  if (!bytes) return null;
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
+function encodeBase64UrlBytes(value: Uint8Array) {
+  let binary = "";
+  value.forEach((byte) => { binary += String.fromCharCode(byte); });
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+function decodeBase64UrlBytes(value: string) {
   if (!/^[A-Za-z0-9_-]+$/.test(value)) return null;
   try {
-    const decoded = Buffer.from(value, "base64url");
-    return decoded.toString("base64url") === value ? decoded : null;
+    const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = `${base64}${"=".repeat((4 - (base64.length % 4)) % 4)}`;
+    const binary = atob(padded);
+    const decoded = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    return encodeBase64UrlBytes(decoded) === value ? decoded : null;
   } catch {
     return null;
   }

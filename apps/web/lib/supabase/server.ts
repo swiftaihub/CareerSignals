@@ -3,6 +3,9 @@ import "server-only";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
+import { getCookiePath } from "@/lib/app-path";
+import { secureAppCookieOptions } from "@/lib/cookie-policy";
+
 export async function createClient({ writable = false }: { writable?: boolean } = {}) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
@@ -15,10 +18,8 @@ export async function createClient({ writable = false }: { writable?: boolean } 
 
   return createServerClient(url, publishableKey, {
     cookieOptions: {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/"
+      ...secureAppCookieOptions(),
+      path: getCookiePath()
     },
     cookies: {
       getAll() {
@@ -27,7 +28,11 @@ export async function createClient({ writable = false }: { writable?: boolean } 
       setAll(cookiesToSet) {
         const writeCookies = () => {
           cookiesToSet.forEach(({ name, value, options }) => {
-            cookieStore.set(name, value, options);
+            cookieStore.set(name, value, {
+              ...options,
+              ...secureAppCookieOptions(),
+              path: getCookiePath()
+            });
           });
         };
         if (writable) {
@@ -37,7 +42,7 @@ export async function createClient({ writable = false }: { writable?: boolean } 
         try {
           writeCookies();
         } catch {
-          // Server Components cannot always write cookies. proxy.ts performs refresh writes.
+          // Server Components cannot always write cookies. middleware.ts performs refresh writes.
         }
       }
     }

@@ -151,11 +151,23 @@ class FakeRepository(JobRepository):
         }
 
 
-def test_health_aliases() -> None:
+def test_health_aliases(monkeypatch) -> None:
+    monkeypatch.delenv("CAREERSIGNAL_SOURCE_COMMIT_SHA", raising=False)
     client = TestClient(app)
 
-    assert client.get("/api/health").json() == {"status": "ok"}
-    assert client.get("/health").json() == {"status": "ok"}
+    expected = {"status": "ok", "source_commit_sha": "unknown"}
+    assert client.get("/api/health").json() == expected
+    assert client.get("/health").json() == expected
+
+
+def test_health_exposes_only_a_valid_source_revision(monkeypatch) -> None:
+    client = TestClient(app)
+    source_sha = "a" * 40
+    monkeypatch.setenv("CAREERSIGNAL_SOURCE_COMMIT_SHA", source_sha)
+    assert client.get("/api/health").json()["source_commit_sha"] == source_sha
+
+    monkeypatch.setenv("CAREERSIGNAL_SOURCE_COMMIT_SHA", "not-a-revision")
+    assert client.get("/api/health").json()["source_commit_sha"] == "unknown"
 
 
 def test_jobs_endpoint_supports_filtering_sorting_and_pagination() -> None:

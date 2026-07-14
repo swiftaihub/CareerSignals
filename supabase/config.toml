@@ -1,0 +1,4 @@
+project_id = "careersignals"
+
+[db.seed]
+enabled = false

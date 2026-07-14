@@ -158,7 +158,9 @@ class ConnectorRefreshWorker:
                 public_status_message="Waiting for another shared-data refresh to finish.",
             )
         except Exception as exc:
-            LOGGER.exception("Global connector refresh %s failed", run_uuid)
+            error_type = type(exc).__name__
+            internal_message = f"{error_type}: Global connector refresh failed."
+            LOGGER.error("Global connector refresh %s failed (%s)", run_uuid, error_type)
             self.repository.finish(
                 connector_run_uuid=run_uuid,
                 status="failed",
@@ -168,7 +170,7 @@ class ConnectorRefreshWorker:
                 shared_dbt_run_completed=False,
                 public_status_message="The shared-data refresh was not completed.",
                 error_code="CONNECTOR_REFRESH_FAILED",
-                internal_error_message=f"{type(exc).__name__}: {exc}",
+                internal_error_message=internal_message,
             )
             LOGGER.error(
                 "Global connector refresh recorded as failed",
@@ -183,7 +185,7 @@ class ConnectorRefreshWorker:
             if run.get("trigger_type") == "first_user_bootstrap":
                 self.bootstrap_repository.mark_global_failed(
                     connector_run_uuid=run_uuid,
-                    internal_error_message=f"{type(exc).__name__}: {exc}",
+                    internal_error_message=internal_message,
                 )
         return True
 

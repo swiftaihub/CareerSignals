@@ -3,7 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from src import main as pipeline_main
+from src.pipelines.shared_connector_refresh import SharedConnectorRefreshError
 
 
 class FakeMotherDuckService:
@@ -12,6 +15,7 @@ class FakeMotherDuckService:
 
 class CapturingIngestionWriter:
     raw_rows_written = -1
+    failed_message: str | None = None
 
     def __init__(self, service: FakeMotherDuckService) -> None:
         self.service = service
@@ -46,7 +50,19 @@ class CapturingIngestionWriter:
         pass
 
     def fail_run(self, run_id: str, error_message: str) -> None:
-        pass
+        self.__class__.failed_message = error_message
+
+
+class FailingIngestionWriter(CapturingIngestionWriter):
+    sensitive_text = "https://example.test/write?token=writer-secret"
+
+    def write_raw_jobs(
+        self,
+        run_id: str,
+        raw_records: list[dict[str, Any]],
+        progress: Any | None = None,
+    ) -> int:
+        raise RuntimeError(self.sensitive_text)
 
 
 def test_motherduck_raw_write_happens_after_freshness_filter(
@@ -72,3 +88,25 @@ def test_motherduck_raw_write_happens_after_freshness_filter(
     assert summary["output_path"] is None
     assert CapturingIngestionWriter.raw_rows_written == 0
     assert not list(tmp_path.glob("*.xlsx"))
+
+
+def test_pipeline_boundary_records_and_raises_only_safe_failure_text(
+    monkeypatch,
+) -> None:
+    FailingIngestionWriter.failed_message = None
+    monkeypatch.setenv("CAREERSIGNAL_DATA_MODE", "motherduck")
+    monkeypatch.setenv("JOB_SOURCES", "mock")
+    monkeypatch.setenv("CAREERSIGNAL_RUN_DBT", "false")
+    monkeypatch.setenv("CAREERSIGNAL_WRITE_DEBUG_JSON", "false")
+    monkeypatch.setattr(pipeline_main, "MotherDuckService", FakeMotherDuckService)
+    monkeypatch.setattr(pipeline_main, "MotherDuckIngestionWriter", FailingIngestionWriter)
+    monkeypatch.setattr(pipeline_main, "init_motherduck_schema", lambda service: None)
+
+    with pytest.raises(SharedConnectorRefreshError) as caught:
+        pipeline_main.run_pipeline(Path.cwd())
+
+    expected = "RuntimeError: Shared connector refresh failed."
+    assert str(caught.value) == expected
+    assert FailingIngestionWriter.failed_message == expected
+    assert FailingIngestionWriter.sensitive_text not in str(caught.value)
+    assert "writer-secret" not in str(FailingIngestionWriter.failed_message)

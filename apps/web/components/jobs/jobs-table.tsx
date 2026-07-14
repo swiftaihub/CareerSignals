@@ -8,6 +8,7 @@ import { MatchScoreBadge } from "@/components/jobs/match-score-badge";
 import { VisaSignalBadge } from "@/components/jobs/visa-signal-badge";
 import { EmptyState } from "@/components/shared/empty-state";
 import { formatCurrency, formatDate, formatNullable } from "@/lib/formatters";
+import { safeExternalHttpUrl } from "@/lib/external-url";
 import { cn } from "@/lib/utils";
 import type { Job, SortOrder } from "@/lib/types";
 
@@ -94,6 +95,8 @@ function WorkBadge({ value }: { value?: string | null }) {
 }
 
 function ActionButtons({ job, onSelectJob }: { job: Job; onSelectJob: (job: Job) => void }) {
+  const jobDescriptionUrl = safeExternalHttpUrl(job.jd_post_link);
+  const applicationUrl = safeExternalHttpUrl(job.apply_link);
   return (
     <div className="flex items-center gap-1.5">
       <button
@@ -105,11 +108,11 @@ function ActionButtons({ job, onSelectJob }: { job: Job; onSelectJob: (job: Job)
         <Eye className="h-3.5 w-3.5" />
         <span className="sr-only">View details</span>
       </button>
-      {job.jd_post_link ? (
+      {jobDescriptionUrl ? (
         <a
           className="btn h-8 w-8 p-0"
-          href={job.jd_post_link}
-          rel="noreferrer"
+          href={jobDescriptionUrl}
+          rel="noopener noreferrer"
           target="_blank"
           title="Open job description"
         >
@@ -117,11 +120,11 @@ function ActionButtons({ job, onSelectJob }: { job: Job; onSelectJob: (job: Job)
           <span className="sr-only">Open job description</span>
         </a>
       ) : null}
-      {job.apply_link ? (
+      {applicationUrl ? (
         <a
           className="btn btn-primary h-8 w-8 p-0"
-          href={job.apply_link}
-          rel="noreferrer"
+          href={applicationUrl}
+          rel="noopener noreferrer"
           target="_blank"
           title="Open application"
         >

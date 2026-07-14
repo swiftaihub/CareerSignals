@@ -6,8 +6,39 @@ export interface BackendErrorPayload {
   resets_at?: string;
 }
 
-export function getBackendBaseUrl() {
-  return (process.env.API_BASE_URL || "http://localhost:8000").replace(/\/$/, "");
+export function getBackendBaseUrl(
+  configured: string | null | undefined = process.env.API_BASE_URL,
+  nodeEnv = process.env.NODE_ENV
+) {
+  const candidate = configured?.trim()
+    || (nodeEnv === "production" ? "" : "http://localhost:8000");
+  if (!candidate || /[\\\u0000-\u001f\u007f]/.test(candidate)) {
+    throw new Error("API_BASE_URL must be configured as an absolute HTTP(S) origin.");
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    throw new Error("API_BASE_URL must be configured as an absolute HTTP(S) origin.");
+  }
+  if (
+    (parsed.protocol !== "http:" && parsed.protocol !== "https:")
+    || parsed.username
+    || parsed.password
+    || parsed.pathname !== "/"
+    || parsed.search
+    || parsed.hash
+  ) {
+    throw new Error("API_BASE_URL must be an HTTP(S) origin without credentials or a path.");
+  }
+  const isLoopback = parsed.hostname === "localhost"
+    || parsed.hostname === "127.0.0.1"
+    || parsed.hostname === "[::1]";
+  if (nodeEnv === "production" && parsed.protocol !== "https:" && !isLoopback) {
+    throw new Error("API_BASE_URL must use HTTPS in production.");
+  }
+  return parsed.origin;
 }
 
 export async function backendFetch(path: string, init: RequestInit = {}) {

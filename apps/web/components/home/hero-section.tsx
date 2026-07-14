@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ArrowRight, CheckCircle2, LogIn, Play, Sparkles } from "lucide-react";
 
 import { demoAction } from "@/app/(auth)/actions";
+import { withBasePath } from "@/lib/app-path";
 
 import { FloatingProductPreview } from "./floating-product-preview";
 import { HOME_ROUTES } from "./home-content";
@@ -55,7 +56,7 @@ export function HeroSection() {
               height={1024}
               priority
               sizes="(max-width: 1023px) 94vw, 55vw"
-              src="/illustrations/hero-career-dashboard.webp"
+              src={withBasePath("/illustrations/hero-career-dashboard.webp")}
               width={1536}
             />
           </div>

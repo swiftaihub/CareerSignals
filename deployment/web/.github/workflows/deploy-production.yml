@@ -1,0 +1,145 @@
+name: Deploy CareerSignals web to production
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_source_sha:
+        description: Full CareerSignals main commit SHA recorded in SOURCE_MANIFEST.json
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: careersignals-web-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 45
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_WORKER_NAME: ${{ vars.CLOUDFLARE_WORKER_NAME }}
+      NEXT_PUBLIC_SITE_ORIGIN: ${{ vars.NEXT_PUBLIC_SITE_ORIGIN }}
+      NEXT_PUBLIC_BASE_PATH: ${{ vars.NEXT_PUBLIC_BASE_PATH }}
+      NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+      API_BASE_URL: ${{ vars.API_BASE_URL }}
+
+    steps:
+      - name: Checkout selected deployment revision
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          package-manager-cache: false
+
+      - name: Validate source manifest and production configuration
+        env:
+          EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          node scripts/validate-source-manifest.mjs web "$EXPECTED_SOURCE_SHA"
+          node scripts/verify-routes.mjs wrangler.jsonc
+          for name in CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_WORKER_NAME NEXT_PUBLIC_SITE_ORIGIN NEXT_PUBLIC_BASE_PATH NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY API_BASE_URL; do
+            test -n "${!name:-}" || { echo "Missing required GitHub variable: $name" >&2; exit 1; }
+          done
+          test "$NEXT_PUBLIC_SITE_ORIGIN" = "https://jobs.swiftaihub.com"
+          test "$NEXT_PUBLIC_BASE_PATH" = "/careersignals"
+          test "$API_BASE_URL" = "https://careersignals-api.swiftaihub.com"
+          test "$CLOUDFLARE_WORKER_NAME" = "careersignals-web"
+          [[ "$NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY" == sb_publishable_* ]] || {
+            echo "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY must use a current browser-safe sb_publishable_ key." >&2
+            exit 1
+          }
+          [[ "$NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY" != *[[:space:]]* && ${#NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY} -ge 32 ]] || {
+            echo "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY has an invalid shape." >&2
+            exit 1
+          }
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Run lint
+        run: npm run lint
+
+      - name: Run typecheck
+        run: npm run typecheck
+
+      - name: Build production Next.js application
+        run: npm run build
+
+      - name: Build OpenNext Worker
+        run: |
+          set -euo pipefail
+          npx opennextjs-cloudflare build
+          node scripts/prepare-cloudflare-assets.mjs
+
+      - name: Scan browser assets for server-only configuration
+        run: node scripts/scan-client-bundle.mjs .next/static .open-next/assets
+
+      - name: Verify the one-time recovery secret exists
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "CLOUDFLARE_API_TOKEN is missing." >&2; exit 1; }
+          secrets_json="$(npx wrangler secret list --name "$CLOUDFLARE_WORKER_NAME" --format json)"
+          SECRETS_JSON="$secrets_json" node - <<'NODE'
+          const secrets = JSON.parse(process.env.SECRETS_JSON || "[]");
+          if (!Array.isArray(secrets) || !secrets.some((entry) => entry?.name === "PASSWORD_RECOVERY_COOKIE_SECRET")) {
+            console.error("Cloudflare PASSWORD_RECOVERY_COOKIE_SECRET is missing; create it once before deployment.");
+            process.exit(1);
+          }
+          NODE
+
+      - name: Record current deployment for rollback
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "CLOUDFLARE_API_TOKEN is missing." >&2; exit 1; }
+          echo "### Previous Cloudflare deployment state" >> "$GITHUB_STEP_SUMMARY"
+          npx wrangler deployments list --name "$CLOUDFLARE_WORKER_NAME" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Deploy Worker and preserve dashboard secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: >-
+          npx opennextjs-cloudflare deploy --
+          --keep-vars
+          --name "$CLOUDFLARE_WORKER_NAME"
+          --var "API_BASE_URL:$API_BASE_URL"
+
+      - name: Verify deployed routes
+        run: node scripts/verify-routes.mjs wrangler.jsonc
+
+      - name: Run production smoke tests
+        env:
+          APP_ORIGIN: ${{ vars.NEXT_PUBLIC_SITE_ORIGIN }}
+          APP_BASE_PATH: ${{ vars.NEXT_PUBLIC_BASE_PATH }}
+          EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+        run: node scripts/smoke-test.mjs
+
+      - name: Record deployment version
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          SOURCE_SHA: ${{ inputs.expected_source_sha }}
+        run: |
+          set -euo pipefail
+          echo "source_sha=$SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
+          npx wrangler deployments list --name "$CLOUDFLARE_WORKER_NAME" | tee -a "$GITHUB_STEP_SUMMARY"

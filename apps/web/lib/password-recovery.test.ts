@@ -18,7 +18,6 @@ import {
   isRecoveryRouteAllowed,
   recoveryAuthCookieKind,
   recoveryRedirectPath,
-  trustedSiteOrigin,
   verifyRecoveryIntent
 } from "./password-recovery";
 
@@ -48,26 +47,6 @@ describe("recovery configuration", () => {
     expect(isRecoveryIntentSecretConfigured(SECRET)).toBe(true);
   });
 
-  it("normalizes trusted HTTP(S) configuration to an origin", () => {
-    expect(trustedSiteOrigin(" http://localhost:3000/path?ignored=1 ", "development"))
-      .toBe("http://localhost:3000");
-    expect(trustedSiteOrigin("https://careersignals.example/reset#ignored", "production"))
-      .toBe("https://careersignals.example");
-  });
-
-  it("rejects missing, relative, credentialed, and unsupported site URLs", () => {
-    expect(() => trustedSiteOrigin(undefined, "development")).toThrow();
-    expect(() => trustedSiteOrigin("/relative", "development")).toThrow();
-    expect(() => trustedSiteOrigin("ftp://careersignals.example", "development")).toThrow();
-    expect(() => trustedSiteOrigin("https:\\\\careersignals.example", "development")).toThrow();
-    expect(() => trustedSiteOrigin("https://user:pass@careersignals.example", "development"))
-      .toThrow(/credentials/i);
-  });
-
-  it("requires HTTPS in production", () => {
-    expect(() => trustedSiteOrigin("http://careersignals.example", "production"))
-      .toThrow(/HTTPS in production/i);
-  });
 });
 
 describe("recovery navigation policy", () => {
@@ -133,46 +112,47 @@ describe("JWT session claim extraction", () => {
 });
 
 describe("signed recovery intent", () => {
-  it("rejects a missing recovery intent marker", () => {
-    expect(verifyRecoveryIntent(undefined, IDENTITY, SECRET, 1_000)).toBe(false);
+  it("rejects a missing recovery intent marker", async () => {
+    await expect(verifyRecoveryIntent(undefined, IDENTITY, SECRET, 1_000)).resolves.toBe(false);
   });
 
-  it("accepts a valid marker bound to the expected user and session", () => {
-    const marker = createRecoveryIntent(IDENTITY, SECRET, 1_000);
-    expect(verifyRecoveryIntent(marker, IDENTITY, SECRET, 1_000)).toBe(true);
-    expect(verifyRecoveryIntent(marker, IDENTITY, SECRET, 1_899)).toBe(true);
+  it("accepts a valid marker bound to the expected user and session", async () => {
+    const marker = await createRecoveryIntent(IDENTITY, SECRET, 1_000);
+    await expect(verifyRecoveryIntent(marker, IDENTITY, SECRET, 1_000)).resolves.toBe(true);
+    await expect(verifyRecoveryIntent(marker, IDENTITY, SECRET, 1_899)).resolves.toBe(true);
   });
 
-  it("rejects expired markers", () => {
-    const marker = createRecoveryIntent(IDENTITY, SECRET, 1_000);
-    expect(verifyRecoveryIntent(marker, IDENTITY, SECRET, 1_900)).toBe(false);
-    expect(verifyRecoveryIntent(marker, IDENTITY, SECRET, 2_000)).toBe(false);
+  it("rejects expired markers", async () => {
+    const marker = await createRecoveryIntent(IDENTITY, SECRET, 1_000);
+    await expect(verifyRecoveryIntent(marker, IDENTITY, SECRET, 1_900)).resolves.toBe(false);
+    await expect(verifyRecoveryIntent(marker, IDENTITY, SECRET, 2_000)).resolves.toBe(false);
   });
 
-  it("rejects markers for a different user or session", () => {
-    const marker = createRecoveryIntent(IDENTITY, SECRET, 1_000);
-    expect(verifyRecoveryIntent(marker, { ...IDENTITY, userId: "other-user" }, SECRET, 1_000))
-      .toBe(false);
-    expect(verifyRecoveryIntent(marker, { ...IDENTITY, sessionId: "other-session" }, SECRET, 1_000))
-      .toBe(false);
+  it("rejects markers for a different user or session", async () => {
+    const marker = await createRecoveryIntent(IDENTITY, SECRET, 1_000);
+    await expect(verifyRecoveryIntent(marker, { ...IDENTITY, userId: "other-user" }, SECRET, 1_000))
+      .resolves.toBe(false);
+    await expect(verifyRecoveryIntent(marker, { ...IDENTITY, sessionId: "other-session" }, SECRET, 1_000))
+      .resolves.toBe(false);
   });
 
-  it("rejects payload and signature tampering", () => {
-    const marker = createRecoveryIntent(IDENTITY, SECRET, 1_000);
+  it("rejects payload and signature tampering", async () => {
+    const marker = await createRecoveryIntent(IDENTITY, SECRET, 1_000);
     const [payload, signature] = marker.split(".");
     const tamperedPayload = `${payload.slice(0, -1)}${payload.endsWith("A") ? "B" : "A"}`;
     const tamperedSignature = `${signature.slice(0, -1)}${signature.endsWith("A") ? "B" : "A"}`;
-    expect(verifyRecoveryIntent(`${tamperedPayload}.${signature}`, IDENTITY, SECRET, 1_000))
-      .toBe(false);
-    expect(verifyRecoveryIntent(`${payload}.${tamperedSignature}`, IDENTITY, SECRET, 1_000))
-      .toBe(false);
-    expect(verifyRecoveryIntent("malformed", IDENTITY, SECRET, 1_000)).toBe(false);
+    await expect(verifyRecoveryIntent(`${tamperedPayload}.${signature}`, IDENTITY, SECRET, 1_000))
+      .resolves.toBe(false);
+    await expect(verifyRecoveryIntent(`${payload}.${tamperedSignature}`, IDENTITY, SECRET, 1_000))
+      .resolves.toBe(false);
+    await expect(verifyRecoveryIntent("malformed", IDENTITY, SECRET, 1_000)).resolves.toBe(false);
   });
 
-  it("requires a secret containing at least 32 bytes", () => {
-    expect(() => createRecoveryIntent(IDENTITY, "x".repeat(31), 1_000)).toThrow(/32 bytes/i);
-    const marker = createRecoveryIntent(IDENTITY, SECRET, 1_000);
-    expect(() => verifyRecoveryIntent(marker, IDENTITY, "x".repeat(31), 1_000))
-      .toThrow(/32 bytes/i);
+  it("requires a secret containing at least 32 bytes", async () => {
+    await expect(createRecoveryIntent(IDENTITY, "x".repeat(31), 1_000))
+      .rejects.toThrow(/32 bytes/i);
+    const marker = await createRecoveryIntent(IDENTITY, SECRET, 1_000);
+    await expect(verifyRecoveryIntent(marker, IDENTITY, "x".repeat(31), 1_000))
+      .rejects.toThrow(/32 bytes/i);
   });
 });

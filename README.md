@@ -32,6 +32,7 @@ config/                           repository defaults and platform Connector con
 data/demo/demo_jobs.json          fixed 20-job Demo fixture
 dbt/                              shared_refresh and user_refresh models/selectors
 docs/                             deployment, operations, and migration guidance
+deployment/                       generated-repository deployment overlays
 packages/careersignal_core/       repositories, tasks, storage, and publication
 scripts/                          bootstrap, seed, migration, and refresh entrypoints
 supabase/migrations/              ordered control-plane and RLS migrations
@@ -42,7 +43,7 @@ tests/                            unit, pipeline-isolation, and RLS integration 
 ## Requirements
 
 - Python 3.11 or 3.12
-- Node.js 20 or newer and npm
+- Node.js 22 or newer and npm (required by the pinned Cloudflare toolchain)
 - Supabase CLI and either a local Supabase stack or a linked Supabase project
 - A MotherDuck database and token for shared/user dbt execution
 - dbt dependencies installed from `requirements.txt` and `dbt/packages.yml`
@@ -83,13 +84,14 @@ The frontend environment is deliberately small:
 API_BASE_URL=http://localhost:8000
 PASSWORD_RECOVERY_COOKIE_SECRET=
 
-# Supabase project metadata safe for the browser.
-NEXT_PUBLIC_SITE_URL=http://localhost:3000
+# Supabase project metadata and canonical routing safe for the browser.
+NEXT_PUBLIC_SITE_ORIGIN=http://localhost:3000
+NEXT_PUBLIC_BASE_PATH=
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_REPLACE_WITH_BROWSER_KEY
 ```
 
-Generate a unique `PASSWORD_RECOVERY_COOKIE_SECRET` of at least 32 bytes for each environment. Password recovery also requires the matching `/auth/callback` URL to be allowed in Supabase; see [Supabase password management configuration](docs/supabase-password-management.md).
+Leave `NEXT_PUBLIC_BASE_PATH` empty for ordinary root-path development, or set it to `/careersignals` for a production-equivalent local build. Generate a unique `PASSWORD_RECOVERY_COOKIE_SECRET` of at least 32 bytes for each environment. Password recovery also requires the matching callback URL to be allowed in Supabase; see [Supabase password management configuration](docs/supabase-password-management.md).
 
 Never add `NEXT_PUBLIC_` to `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`, `MOTHERDUCK_TOKEN`, `DEMO_SESSION_SECRET`, Connector credentials, or any other secret. The browser calls the same-origin Next.js BFF, which attaches the verified server-side session when forwarding allowlisted application requests to FastAPI.
 
@@ -178,7 +180,7 @@ python -m apps.scheduler.main
 cd apps/web && npm run dev
 ```
 
-The web application is available at `http://localhost:3000`; the API health endpoint is `http://localhost:8000/api/health`.
+The web application is available at `http://localhost:3000` with an empty base path, or at `http://localhost:3000/careersignals` when `NEXT_PUBLIC_BASE_PATH=/careersignals`. The API health endpoint is `http://localhost:8000/api/health`.
 
 Alternatively, after preparing `.env` and `apps/web/.env.local`:
 
@@ -189,6 +191,8 @@ docker compose up
 The Compose stack runs API, worker, scheduler, and web processes. It does not run a fake local MotherDuck server; configure the real MotherDuck service. Supabase remains a local CLI stack or hosted project outside this Compose file.
 
 ## Application routes
+
+Routes below are logical application paths. Production serves every one below `/careersignals`; for example, `/dashboard` becomes `https://jobs.swiftaihub.com/careersignals/dashboard`.
 
 Public routes:
 
@@ -309,6 +313,7 @@ cd apps/web
 npm install
 npm run test
 npm run lint
+npm run typecheck
 npm run build
 ```
 
@@ -334,8 +339,8 @@ RLS and two-user tests require real Supabase test credentials from the non-commi
 
 ## Production
 
-Deploy API, worker, scheduler, and web as separate processes. Run exactly one logical scheduler, keep `USER_PIPELINE_MAX_CONCURRENCY=1` until MotherDuck writer concurrency has been validated, terminate TLS before Next.js, set exact production CORS origins, and store all secrets in the hosting platform's secret manager.
+The generated web repository deploys SSR Next.js to Cloudflare Workers through OpenNext. The generated backend repository deploys one immutable ARM64 image as separate API, worker, and single-scheduler services on Oracle A1 behind Caddy. Keep `USER_PIPELINE_MAX_CONCURRENCY=1` until MotherDuck writer concurrency has been validated, set exact production CORS origins, and store runtime secrets outside Git.
 
-Back up PostgreSQL before migrations, monitor queue age and refresh freshness, and test Demo/user/Admin authorization after every release. Full deployment, health, backup, restore, and rollback procedures are in [production deployment and operations](docs/deployment.md).
+Start with the [production deployment overview](docs/production-deployment.md). The [repository split](docs/repository-splitting.md), [Cloudflare deployment](docs/cloudflare-deployment.md), [Oracle deployment](docs/oracle-deployment.md), [runbook](docs/production-runbook.md), and [rollback guide](docs/rollback.md) contain the release and recovery procedures. The legacy consolidated operational notes remain in [deployment.md](docs/deployment.md).
 
 Billing is currently a manual entitlement placeholder. `estimated_mrr_cents` is a projection for active non-Demo users; only successful billing events count as actual revenue. A future Stripe integration should use verified, idempotent webhooks to append billing and entitlement events rather than mutating remaining-day counters.

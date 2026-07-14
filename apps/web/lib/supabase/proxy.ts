@@ -1,6 +1,12 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { getCookiePath, getSiteOrigin, withBasePath } from "@/lib/app-path";
+import {
+  clearAppCookie,
+  clearLegacyRootCookie,
+  secureAppCookieOptions
+} from "@/lib/cookie-policy";
 import {
   extractSessionId,
   isRecoveryAuthCookieName,
@@ -10,7 +16,6 @@ import {
   RECOVERY_AUTH_COOKIE_MAX_AGE_SECONDS,
   RECOVERY_AUTH_COOKIE_NAME,
   RECOVERY_INTENT_COOKIE_NAME,
-  trustedSiteOrigin,
   verifyRecoveryIntent
 } from "@/lib/password-recovery";
 
@@ -31,7 +36,9 @@ export async function updateSession(request: NextRequest) {
       setNoStoreHeaders(unavailable);
       return unavailable;
     }
-    return NextResponse.next({ request });
+    const response = NextResponse.next({ request });
+    clearLegacyApplicationCookies(request, response);
+    return response;
   }
 
   if (hasRecoverySession || hasRecoveryIntent) {
@@ -41,10 +48,8 @@ export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
   const supabase = createServerClient(url, publishableKey, {
     cookieOptions: {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/"
+      ...secureAppCookieOptions(),
+      path: getCookiePath()
     },
     cookies: {
       getAll() {
@@ -54,14 +59,21 @@ export async function updateSession(request: NextRequest) {
         cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
         response = NextResponse.next({ request });
         cookiesToSet.forEach(({ name, value, options }) => {
-          response.cookies.set(name, value, options);
+          response.cookies.set(name, value, {
+            ...options,
+            ...secureAppCookieOptions(),
+            path: getCookiePath()
+          });
         });
+        cookiesToSet.forEach(({ name }) => clearLegacyRootCookie(response, name));
       }
     }
   });
 
   // Validate and refresh the ordinary session before layouts inspect it.
   await supabase.auth.getUser();
+  clearLegacySupabaseCookies(request, response, url);
+  clearLegacyApplicationCookies(request, response);
   return response;
 }
 
@@ -74,10 +86,8 @@ async function updateRecoverySession(
   const recoveryClient = createServerClient(supabaseUrl, publishableKey, {
     cookieOptions: {
       name: RECOVERY_AUTH_COOKIE_NAME,
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/",
+      ...secureAppCookieOptions(),
+      path: getCookiePath(),
       maxAge: RECOVERY_AUTH_COOKIE_MAX_AGE_SECONDS
     },
     cookies: {
@@ -90,15 +100,14 @@ async function updateRecoverySession(
         cookiesToSet.forEach(({ name, value, options }) => {
           response.cookies.set(name, value, {
             ...options,
-            httpOnly: true,
-            secure: process.env.NODE_ENV === "production",
-            sameSite: "lax",
-            path: "/",
+            ...secureAppCookieOptions(),
+            path: getCookiePath(),
             maxAge: !value || options.maxAge === 0
               ? 0
               : RECOVERY_AUTH_COOKIE_MAX_AGE_SECONDS
           });
         });
+        cookiesToSet.forEach(({ name }) => clearLegacyRootCookie(response, name));
       }
     }
   });
@@ -111,19 +120,21 @@ async function updateRecoverySession(
   const intent = request.cookies.get(RECOVERY_INTENT_COOKIE_NAME)?.value;
   const secret = process.env.PASSWORD_RECOVERY_COOKIE_SECRET;
   const validSecret = isRecoveryIntentSecretConfigured(secret);
-  const validIntent = Boolean(
+  let validIntent = false;
+  if (
     !userError
     && user
     && session
     && sessionId
     && intent
     && validSecret
-    && verifyRecoveryIntent(
+  ) {
+    validIntent = await verifyRecoveryIntent(
       intent,
       { userId: user.id, sessionId },
-      secret!
-    )
-  );
+      secret
+    );
+  }
 
   if (!validIntent) {
     try {
@@ -136,37 +147,32 @@ async function updateRecoverySession(
   }
 
   setNoStoreHeaders(response);
+  clearLegacyApplicationCookies(request, response);
   if (isRecoveryRouteAllowed(request.nextUrl.pathname)) return response;
   return recoveryRedirectResponse(response, "/reset-password");
 }
 
 function clearRecoveryResponseCookies(request: NextRequest, response: NextResponse) {
+  const names = new Set<string>();
   request.cookies.getAll().forEach(({ name }) => {
     if (
       isRecoveryAuthCookieName(name)
       || name === RECOVERY_INTENT_COOKIE_NAME
     ) {
-      response.cookies.set(name, "", {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        path: "/",
-        maxAge: 0
-      });
+      names.add(name);
     }
   });
+  names.forEach((name) => clearAppCookie(response.cookies, name));
+  names.forEach((name) => clearLegacyRootCookie(response, name));
 }
 
 function recoveryRedirectResponse(
   cookieSource: NextResponse,
   pathname: string
 ) {
-  let origin: string;
+  let destination: URL;
   try {
-    origin = trustedSiteOrigin(
-      process.env.NEXT_PUBLIC_SITE_URL,
-      process.env.NODE_ENV
-    );
+    destination = new URL(withBasePath(pathname), getSiteOrigin());
   } catch {
     const unavailable = NextResponse.json(
       { error: "Password recovery is not configured." },
@@ -177,14 +183,54 @@ function recoveryRedirectResponse(
     return unavailable;
   }
 
-  const redirect = NextResponse.redirect(new URL(pathname, origin), 303);
+  const redirect = NextResponse.redirect(destination, 303);
   copyResponseCookies(cookieSource, redirect);
   setNoStoreHeaders(redirect);
   return redirect;
 }
 
+function clearLegacySupabaseCookies(
+  request: NextRequest,
+  response: NextResponse,
+  supabaseUrl: string
+) {
+  if (getCookiePath() === "/") return;
+  let projectRef: string;
+  try {
+    projectRef = new URL(supabaseUrl).hostname.split(".")[0] ?? "";
+  } catch {
+    return;
+  }
+  if (!projectRef || !/^[A-Za-z0-9_-]+$/.test(projectRef)) return;
+  const baseName = `sb-${projectRef}-auth-token`;
+  request.cookies.getAll().forEach(({ name }) => {
+    if (
+      name === baseName
+      || name === `${baseName}-code-verifier`
+      || new RegExp(`^${baseName}(?:-code-verifier)?\\.\\d+$`).test(name)
+    ) {
+      clearLegacyRootCookie(response, name);
+    }
+  });
+}
+
 function copyResponseCookies(source: NextResponse, destination: NextResponse) {
-  source.cookies.getAll().forEach((cookie) => destination.cookies.set(cookie));
+  source.headers.getSetCookie().forEach((cookie) => {
+    destination.headers.append("Set-Cookie", cookie);
+  });
+}
+
+function clearLegacyApplicationCookies(request: NextRequest, response: NextResponse) {
+  if (getCookiePath() === "/") return;
+  request.cookies.getAll().forEach(({ name }) => {
+    if (
+      name === "careersignals-demo-token"
+      || name === RECOVERY_INTENT_COOKIE_NAME
+      || isRecoveryAuthCookieName(name)
+    ) {
+      clearLegacyRootCookie(response, name);
+    }
+  });
 }
 
 function setNoStoreHeaders(response: NextResponse) {

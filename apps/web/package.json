@@ -2,13 +2,20 @@
   "name": "careersignal-web",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
     "dev": "next dev",
     "lint": "eslint . --max-warnings=0",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "build:opennext": "opennextjs-cloudflare build && node scripts/prepare-cloudflare-assets.mjs",
+    "preview:cloudflare": "npm run build:opennext && opennextjs-cloudflare preview",
+    "deploy:cloudflare": "npm run build:opennext && opennextjs-cloudflare deploy",
+    "upload:cloudflare": "npm run build:opennext && opennextjs-cloudflare upload"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
@@ -27,6 +34,7 @@
     "zod": "^4.1.11"
   },
   "devDependencies": {
+    "@opennextjs/cloudflare": "1.20.1",
     "@eslint/eslintrc": "^3.2.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
@@ -40,6 +48,7 @@
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.16",
     "typescript": "^5.5.0",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "wrangler": "4.110.0"
   }
 }

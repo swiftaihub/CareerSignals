@@ -89,18 +89,20 @@ class UserPipelineWorker:
                 reason="Pipeline is waiting for an available processing slot.",
             )
         except Exception as exc:  # worker boundary intentionally catches all task failures
-            LOGGER.exception("User pipeline run %s failed", run_uuid)
+            error_type = type(exc).__name__
+            internal_message = f"{error_type}: User pipeline execution failed."
+            LOGGER.error("User pipeline run %s failed (%s)", run_uuid, error_type)
             self.repository.fail(
                 run_uuid=run_uuid,
                 error_code="PIPELINE_EXECUTION_FAILED",
                 public_message="The pipeline failed. Your previous results are still available.",
-                internal_message=f"{type(exc).__name__}: {exc}",
+                internal_message=internal_message,
             )
             if bootstrap_uuid:
                 self.bootstrap_repository.mark_personal_failed(
                     bootstrap_uuid=bootstrap_uuid,
                     run_uuid=run_uuid,
-                    internal_error_message=f"{type(exc).__name__}: {exc}",
+                    internal_error_message=internal_message,
                 )
         return True
 
