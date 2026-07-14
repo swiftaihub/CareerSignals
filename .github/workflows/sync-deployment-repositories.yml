@@ -132,9 +132,11 @@ jobs:
           fi
 
           echo "source_sha=${source_sha}" >> "${GITHUB_OUTPUT}"
-          echo "Source revision: ${source_sha}" >> "${GITHUB_STEP_SUMMARY}"
-          echo "Target branch: ${TARGET_BRANCH}" >> "${GITHUB_STEP_SUMMARY}"
-          echo "Dry run: ${DRY_RUN}" >> "${GITHUB_STEP_SUMMARY}"
+          {
+            echo "Source revision: ${source_sha}"
+            echo "Target branch: ${TARGET_BRANCH}"
+            echo "Dry run: ${DRY_RUN}"
+          } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Validate canonical sync trigger
         shell: bash
