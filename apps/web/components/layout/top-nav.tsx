@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { ExternalLink, LogOut, Menu } from "lucide-react";
 
-import { logoutAction } from "@/app/(auth)/actions";
 import { adminItems, navItems } from "@/components/layout/app-sidebar";
+import { withBasePath } from "@/lib/app-path";
 import type { CurrentUser } from "@/lib/types";
 
 export function TopNav({ user }: { user?: CurrentUser | null }) {
@@ -59,7 +59,7 @@ export function TopNav({ user }: { user?: CurrentUser | null }) {
             <ExternalLink className="h-4 w-4" />
           </Link>
           {user ? (
-            <form action={logoutAction}>
+            <form action={withBasePath("/auth/logout")} method="post">
               <button className="btn btn-ghost" type="submit" title="Log out">
                 <LogOut className="h-4 w-4" />
                 <span className="hidden sm:inline">Log out</span>

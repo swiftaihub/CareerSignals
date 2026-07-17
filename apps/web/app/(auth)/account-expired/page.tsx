@@ -1,5 +1,5 @@
-import { logoutAction } from "@/app/(auth)/actions";
 import { AuthShell } from "@/components/auth/auth-shell";
+import { withBasePath } from "@/lib/app-path";
 import { getCurrentUser } from "@/lib/auth";
 import { formatDateTime } from "@/lib/formatters";
 
@@ -15,7 +15,7 @@ export default async function AccountExpiredPage() {
           </div>
         ) : null}
         <p>Contact a CareerSignals administrator to renew your entitlement.</p>
-        <form action={logoutAction}><button className="btn w-full" type="submit">Log out</button></form>
+        <form action={withBasePath("/auth/logout")} method="post"><button className="btn w-full" type="submit">Log out</button></form>
       </div>
     </AuthShell>
   );

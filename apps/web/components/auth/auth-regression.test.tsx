@@ -37,6 +37,9 @@ describe("existing authentication UI", () => {
     };
     render(<TopNav user={user} />);
 
-    expect(screen.getByRole("button", { name: "Log out" })).toBeEnabled();
+    const button = screen.getByRole("button", { name: "Log out" });
+    expect(button).toBeEnabled();
+    expect(button.closest("form")).toHaveAttribute("action", "/auth/logout");
+    expect(button.closest("form")).toHaveAttribute("method", "post");
   });
 });

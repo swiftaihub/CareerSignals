@@ -1,7 +1,7 @@
 import Link from "next/link";
 
-import { logoutAction } from "@/app/(auth)/actions";
 import { AuthShell } from "@/components/auth/auth-shell";
+import { withBasePath } from "@/lib/app-path";
 import { getCurrentUser } from "@/lib/auth";
 
 export default async function PendingPage({ searchParams }: { searchParams: Promise<{ registered?: string }> }) {
@@ -13,7 +13,7 @@ export default async function PendingPage({ searchParams }: { searchParams: Prom
         {user ? <p>Signed in as <strong>{user.username}</strong>. Account status: <strong>{user.account_status}</strong>.</p> : <p>You may sign in later to check your account state.</p>}
         <div className="flex gap-3">
           <Link className="btn flex-1" href="/">Home</Link>
-          {user ? <form action={logoutAction} className="flex-1"><button className="btn w-full" type="submit">Log out</button></form> : <Link className="btn btn-primary flex-1" href="/login">Sign in</Link>}
+          {user ? <form action={withBasePath("/auth/logout")} className="flex-1" method="post"><button className="btn w-full" type="submit">Log out</button></form> : <Link className="btn btn-primary flex-1" href="/login">Sign in</Link>}
         </div>
       </div>
     </AuthShell>

@@ -12,6 +12,7 @@ import {
   secureAppCookieOptions
 } from "@/lib/cookie-policy";
 import { safeRedirectPath } from "@/lib/navigation";
+import { clearAuthenticationSession } from "@/lib/logout";
 import {
   requestPasswordReset,
   updateAuthenticatedPassword,
@@ -368,25 +369,6 @@ export async function demoAction() {
 }
 
 export async function logoutAction() {
-  const supabase = await createClient();
-  try {
-    await supabase.auth.signOut();
-  } catch {
-    try {
-      await supabase.auth.signOut({ scope: "local" });
-    } catch {
-      // Recovery/demo cookies are still cleared and logout must still navigate.
-    }
-  }
-  try {
-    const recoveryClient = await createWritableRecoveryClient();
-    await recoveryClient.auth.signOut({ scope: "local" });
-  } catch {
-    // Explicit cookie cleanup below still removes local recovery state.
-  }
-  await clearRecoveryCookies();
-  const cookieStore = await cookies();
-  clearAppCookie(cookieStore, DEMO_TOKEN_COOKIE);
-  clearAppCookie(cookieStore, RECOVERY_INTENT_COOKIE_NAME);
+  await clearAuthenticationSession();
   redirect(buildAppUrl("/"));
 }
