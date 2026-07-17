@@ -49,13 +49,19 @@ def test_worker_main_uses_worker_validation_and_heartbeat(monkeypatch) -> None:
         "verify_worker_runtime",
         lambda: runtime_checks.append("motherduck"),
     )
-    monkeypatch.setattr(worker_main, "ConnectorRefreshWorker", lambda **_kwargs: object())
+    recoveries: list[str] = []
+    connector_worker = SimpleNamespace(
+        recover_stale_runs=lambda: recoveries.append("connectors"),
+        process_one=lambda: False,
+    )
+    monkeypatch.setattr(worker_main, "ConnectorRefreshWorker", lambda **_kwargs: connector_worker)
     monkeypatch.setattr(worker_main, "UserPipelineWorker", lambda **_kwargs: object())
 
     worker_main.main()
 
     assert validations == ["worker"]
     assert runtime_checks == ["motherduck"]
+    assert recoveries == ["connectors"]
     assert (CapturingHeartbeat.entered, CapturingHeartbeat.exited) == (1, 1)
 
 

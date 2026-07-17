@@ -30,6 +30,7 @@ def main() -> None:
         stop_event = threading.Event()
         connector_worker = ConnectorRefreshWorker(settings=settings)
         user_worker = UserPipelineWorker(settings=settings)
+        connector_worker.recover_stale_runs()
         logging.getLogger(__name__).info("CareerSignals worker started")
         while not stop_event.is_set():
             processed_global = connector_worker.process_one()

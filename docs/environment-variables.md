@@ -204,6 +204,8 @@ Unless stated otherwise, values belong only in `/opt/careersignals/env/worker.en
 | `DBT_PROFILES_DIR` | Non-secret path | Optional | Dockerfile already sets `/app/dbt` |
 | `CAREERSIGNAL_RUN_DBT` | Non-secret | **Gate:** `true` | Keeps the fixed shared dbt selector enabled |
 | `USER_PIPELINE_MAX_CONCURRENCY` | Non-secret | **Gate:** initial value `1` | Shared MotherDuck writer-slot limit; raise only after load and failure testing |
+| `CONNECTOR_REFRESH_MAX_SECONDS` | Non-secret | **Compose-provided:** `1800` | Execution window used to close orphaned running refreshes when the Worker restarts |
+| `CONNECTOR_SOURCE_MAX_CONCURRENCY` | Non-secret | **Compose-provided:** `5` | Number of independent connector sources fetched in parallel; each source remains sequential internally |
 | `USER_PIPELINE_POLL_SECONDS` | Non-secret | Optional, default `2` | Idle queue polling interval, accepted range 0.25–60 seconds |
 | `CAREERSIGNAL_MOTHERDUCK_BATCH_SIZE` | Non-secret | Optional, default `1000` | Positive ingestion batch size |
 | `CAREERSIGNAL_PROGRESS` | Non-secret | Optional | Interactive progress output; normally disable for service logs |

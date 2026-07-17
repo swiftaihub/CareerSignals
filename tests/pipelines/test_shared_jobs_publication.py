@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from datetime import datetime, timezone
 
 import pytest
 
 from packages.careersignal_core.publication.shared_jobs import (
     SharedJobsPublisher,
+    _bounded_optional_timestamp,
     _finite_optional_number,
 )
 
@@ -17,10 +19,12 @@ class _Connection:
     def __init__(self, *, fail_on: str | None = None) -> None:
         self.fail_on = fail_on
         self.statements: list[str] = []
+        self.params: list[list[object]] = []
 
     def execute(self, statement: str, params=None):
         normalized = " ".join(statement.casefold().split())
         self.statements.append(normalized)
+        self.params.append(list(params or []))
         if self.fail_on and self.fail_on in normalized:
             raise RuntimeError("forced publication failure")
 
@@ -59,6 +63,27 @@ def test_non_finite_shared_salary_values_become_database_null(value: object) -> 
 
 def test_finite_shared_salary_value_is_preserved() -> None:
     assert _finite_optional_number(125000) == 125000
+
+
+def test_shared_timestamp_normalization_discards_out_of_range_values() -> None:
+    assert _bounded_optional_timestamp("48113-11-21T00:00:01Z") is None
+    assert _bounded_optional_timestamp("not-a-date") is None
+    assert _bounded_optional_timestamp("2026-07-12T10:00:00Z") == datetime(
+        2026, 7, 12, 10, 0, tzinfo=timezone.utc
+    )
+
+
+def test_shared_publication_writes_invalid_posted_at_as_database_null() -> None:
+    connection = _Connection()
+    job = _job()
+    job["posted_at"] = "48113-11-21T00:00:01Z"
+
+    SharedJobsPublisher(
+        store=_Store(connection),  # type: ignore[arg-type]
+        analytics_repository=_Analytics(),  # type: ignore[arg-type]
+    ).publish([job], connector_run_uuid=RUN_UUID)
+
+    assert connection.params[0][14] is None
 
 
 def test_successful_shared_publication_records_snapshot_in_same_transaction() -> None:

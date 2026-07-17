@@ -111,3 +111,10 @@ def test_production_daily_pipeline_limit_is_owned_by_the_api() -> None:
     assert 'require_exact "$api_env" USER_PIPELINE_DAILY_LIMIT 4' in verifier
     assert 'forbid_key "$worker_env" USER_PIPELINE_DAILY_LIMIT' in verifier
     assert 'require_exact "$worker_env" USER_PIPELINE_MAX_CONCURRENCY 1' in verifier
+
+
+def test_production_worker_bounds_and_parallelizes_connector_refreshes() -> None:
+    compose = _read("deployment/backend/docker-compose.production.yml")
+
+    assert 'CONNECTOR_REFRESH_MAX_SECONDS: "1800"' in compose
+    assert 'CONNECTOR_SOURCE_MAX_CONCURRENCY: "5"' in compose

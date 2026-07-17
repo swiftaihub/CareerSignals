@@ -78,6 +78,12 @@ class AppSettings(BaseSettings):
     connector_stale_after_hours: int = Field(
         default=8, ge=1, validation_alias="CONNECTOR_STALE_AFTER_HOURS"
     )
+    connector_refresh_max_seconds: int = Field(
+        default=1800,
+        ge=60,
+        le=86400,
+        validation_alias="CONNECTOR_REFRESH_MAX_SECONDS",
+    )
     connector_refresh_trigger_mode: Literal["scheduled", "first_user_bootstrap", "both"] = Field(
         default="scheduled", validation_alias="CONNECTOR_REFRESH_TRIGGER_MODE"
     )

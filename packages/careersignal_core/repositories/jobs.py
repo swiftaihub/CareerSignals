@@ -1508,8 +1508,18 @@ class PostgresJobRepository(JobRepository):
                 matches.matched_skills as all_extracted_skills,
                 jobs.apply_url as jd_post_link,
                 jobs.apply_url as apply_link,
-                jobs.posted_at as date_posted,
-                jobs.last_seen_at as date_collected,
+                case
+                  when jobs.posted_at >= timestamptz '1970-01-01'
+                   and jobs.posted_at < timestamptz '2100-01-01'
+                    then jobs.posted_at
+                  else null
+                end as date_posted,
+                case
+                  when jobs.last_seen_at >= timestamptz '1970-01-01'
+                   and jobs.last_seen_at < timestamptz '2100-01-01'
+                    then jobs.last_seen_at
+                  else null
+                end as date_collected,
                 jobs.source_name as source,
                 {status_display} as application_status,
                 status.notes,

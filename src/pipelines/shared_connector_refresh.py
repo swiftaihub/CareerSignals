@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import time
 from typing import Any, Iterable
@@ -39,7 +40,7 @@ from src.connectors.lever_connector import LeverConnector
 from src.connectors.mock_connector import MockJobConnector
 from src.connectors.serpapi_connector import SerpApiConnector
 from src.connectors.usajobs_connector import USAJobsConnector
-from src.connectors.http_utils import limited_search_pairs
+from src.connectors.http_utils import env_int, limited_search_pairs
 from src.ingestion.persistence import write_json_snapshot
 from src.pipelines.shared_processing import (
     apply_shared_freshness_filter,
@@ -333,59 +334,82 @@ def collect_connector_jobs(
     categories: list[JobCategoryConfig],
     progress: ProgressReporter | None = None,
     retry: ConnectorRetryConfig | None = None,
+    max_source_concurrency: int = 5,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    raw_records: list[dict[str, Any]] = []
-    errors: list[dict[str, Any]] = []
-    work = [(connector, category) for connector in connectors for category in categories]
-    iterable: Iterable[tuple[BaseJobConnector, JobCategoryConfig]] = (
-        progress.iter(work, "Fetching shared Connector jobs", total=len(work))
-        if progress
-        else work
-    )
-    for connector, category in iterable:
-        policy = retry or ConnectorRetryConfig(max_attempts=1, backoff_seconds=0)
-        fetched: list[dict[str, Any]] | None = None
-        for attempt in range(1, policy.max_attempts + 1):
-            try:
-                fetched = connector.fetch_jobs(category)
-                break
-            except Exception as exc:  # one source must not prevent other sources
-                if attempt < policy.max_attempts:
-                    LOGGER.warning(
-                        "Connector %s failed for category %s (attempt %s/%s)",
+    policy = retry or ConnectorRetryConfig(max_attempts=1, backoff_seconds=0)
+
+    def collect_source(
+        connector: BaseJobConnector,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        source_records: list[dict[str, Any]] = []
+        source_errors: list[dict[str, Any]] = []
+        for category in categories:
+            fetched: list[dict[str, Any]] | None = None
+            for attempt in range(1, policy.max_attempts + 1):
+                try:
+                    fetched = connector.fetch_jobs(category)
+                    break
+                except Exception as exc:  # one source must not prevent other sources
+                    if attempt < policy.max_attempts:
+                        LOGGER.warning(
+                            "Connector %s failed for category %s (attempt %s/%s)",
+                            connector.source_name,
+                            category.category_name,
+                            attempt,
+                            policy.max_attempts,
+                        )
+                        if policy.backoff_seconds:
+                            time.sleep(policy.backoff_seconds * attempt)
+                        continue
+                    LOGGER.error(
+                        "Connector %s failed for category %s (%s)",
                         connector.source_name,
                         category.category_name,
-                        attempt,
-                        policy.max_attempts,
+                        type(exc).__name__,
                     )
-                    if policy.backoff_seconds:
-                        time.sleep(policy.backoff_seconds * attempt)
-                    continue
-                LOGGER.error(
-                    "Connector %s failed for category %s (%s)",
-                    connector.source_name,
-                    category.category_name,
-                    type(exc).__name__,
-                )
-                errors.append(
-                    {
-                        "source": connector.source_name,
-                        "category_name": category.category_name,
-                        "query_title": ", ".join(category.search_titles),
-                        "error_message": "Connector request failed.",
-                        "error_type": type(exc).__name__,
-                    }
-                )
-        if fetched is None:
-            continue
-        raw_records.extend(
-            {
-                **record,
-                "_careersignal_category": category,
-                "_careersignal_source": connector.source_name,
-            }
-            for record in fetched
+                    source_errors.append(
+                        {
+                            "source": connector.source_name,
+                            "category_name": category.category_name,
+                            "query_title": ", ".join(category.search_titles),
+                            "error_message": "Connector request failed.",
+                            "error_type": type(exc).__name__,
+                        }
+                    )
+            if fetched is None:
+                continue
+            source_records.extend(
+                {
+                    **record,
+                    "_careersignal_category": category,
+                    "_careersignal_source": connector.source_name,
+                }
+                for record in fetched
+            )
+        return source_records, source_errors
+
+    worker_count = min(max(1, max_source_concurrency), len(connectors))
+    if worker_count <= 1:
+        source_results = [collect_source(connector) for connector in connectors]
+    else:
+        LOGGER.info(
+            "Fetching %s connector sources with concurrency %s",
+            len(connectors),
+            worker_count,
         )
+        with ThreadPoolExecutor(
+            max_workers=worker_count,
+            thread_name_prefix="connector-source",
+        ) as executor:
+            futures = [executor.submit(collect_source, connector) for connector in connectors]
+            # Resolve in connector order so snapshots and diagnostics remain deterministic.
+            source_results = [future.result() for future in futures]
+
+    raw_records: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+    for source_records, source_errors in source_results:
+        raw_records.extend(source_records)
+        errors.extend(source_errors)
     return raw_records, errors
 
 
@@ -510,6 +534,10 @@ def run_shared_connector_refresh(
                 categories,
                 progress,
                 retry=configs.platform_connector.retry,
+                max_source_concurrency=min(
+                    env_int("CONNECTOR_SOURCE_MAX_CONCURRENCY", 5),
+                    10,
+                ),
             )
 
             fetched_count = len(raw_records)

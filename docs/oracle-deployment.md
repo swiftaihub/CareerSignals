@@ -156,7 +156,7 @@ The per-user daily submission quota is API-owned. Production requires `USER_PIPE
 The identity represented by `MOTHERDUCK_TOKEN` must own or have shared access to the exact database named by `MOTHERDUCK_DATABASE` (production uses `CareerSignal`). A syntactically valid token is insufficient if that database is unavailable to its identity; the Worker readiness gate intentionally rejects that release instead of accepting a process that cannot execute global or personal refreshes.
 - `migration.env`: direct production database URI and project reference. No application runtime secrets beyond what migration requires.
 
-The Dockerfile supplies `/app/dbt` for both dbt directories. Compose supplies separate heartbeat paths in an in-memory `/run/careersignals` filesystem and fixes initial Worker concurrency to one. Do not add host storage for local outputs, spreadsheets, or a DuckDB database; production analytics uses MotherDuck and the serving layer is PostgreSQL.
+The Dockerfile supplies `/app/dbt` for both dbt directories. Compose supplies separate heartbeat paths in an in-memory `/run/careersignals` filesystem, fixes the MotherDuck writer concurrency to one, fetches up to five independent connector sources in parallel, and uses a 30-minute orphan-recovery window for global refresh records. Do not add host storage for local outputs, spreadsheets, or a DuckDB database; production analytics uses MotherDuck and the serving layer is PostgreSQL.
 
 Validate a staged or current release without displaying values:
 
