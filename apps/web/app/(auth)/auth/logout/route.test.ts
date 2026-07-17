@@ -27,7 +27,11 @@ describe("stable logout route", () => {
     const request = new NextRequest("https://jobs.swiftaihub.com/careersignals/auth/logout", {
       method: "POST",
       headers: {
-        cookie: "sb-jmgodcrpsfmzpctstnjp-auth-token=legacy; careersignals-demo-token=demo",
+        cookie: [
+          "sb-jmgodcrpsfmzpctstnjp-auth-token=legacy",
+          "careersignals-demo-token-v2=current-demo",
+          "careersignals-demo-token=legacy-demo"
+        ].join("; "),
         origin: "https://jobs.swiftaihub.com"
       }
     });
@@ -40,8 +44,21 @@ describe("stable logout route", () => {
       "https://jobs.swiftaihub.com/careersignals"
     );
     expect(response.headers.get("cache-control")).toBe("private, no-store, max-age=0");
-    expect(response.headers.getSetCookie().join("\n")).toContain(
+    const setCookies = response.headers.getSetCookie().join("\n");
+    expect(setCookies).toContain(
       "sb-jmgodcrpsfmzpctstnjp-auth-token=; Path=/;"
+    );
+    expect(setCookies).toContain(
+      "careersignals-demo-token-v2=; Path=/careersignals;"
+    );
+    expect(setCookies).toContain(
+      "careersignals-demo-token-v2=; Path=/;"
+    );
+    expect(setCookies).toContain(
+      "careersignals-demo-token=; Path=/careersignals;"
+    );
+    expect(setCookies).toContain(
+      "careersignals-demo-token=; Path=/;"
     );
   });
 

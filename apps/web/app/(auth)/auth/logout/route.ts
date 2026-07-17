@@ -1,8 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { buildAppUrl } from "@/lib/app-path";
-import { DEMO_TOKEN_COOKIE } from "@/lib/auth";
-import { clearLegacyRootCookie } from "@/lib/cookie-policy";
+import { clearAppCookie, clearLegacyRootCookie } from "@/lib/cookie-policy";
+import { DEMO_TOKEN_COOKIE_NAMES } from "@/lib/demo-cookie";
 import { clearAuthenticationSession } from "@/lib/logout";
 import { isRecoveryAuthCookieName, RECOVERY_INTENT_COOKIE_NAME } from "@/lib/password-recovery";
 
@@ -22,7 +22,7 @@ function ordinaryAuthCookieBaseName() {
 
 function isLogoutCookie(name: string, authCookieBaseName: string | null) {
   if (
-    name === DEMO_TOKEN_COOKIE
+    DEMO_TOKEN_COOKIE_NAMES.includes(name as typeof DEMO_TOKEN_COOKIE_NAMES[number])
     || name === RECOVERY_INTENT_COOKIE_NAME
     || isRecoveryAuthCookieName(name)
   ) return true;
@@ -44,11 +44,17 @@ export async function POST(request: NextRequest) {
   await clearAuthenticationSession();
   const response = NextResponse.redirect(buildAppUrl("/"), 303);
   const authCookieBaseName = ordinaryAuthCookieBaseName();
+  const cookieNames = new Set<string>([
+    ...DEMO_TOKEN_COOKIE_NAMES,
+    RECOVERY_INTENT_COOKIE_NAME
+  ]);
   request.cookies.getAll().forEach(({ name }) => {
     if (isLogoutCookie(name, authCookieBaseName)) {
-      clearLegacyRootCookie(response, name);
+      cookieNames.add(name);
     }
   });
+  cookieNames.forEach((name) => clearAppCookie(response.cookies, name));
+  cookieNames.forEach((name) => clearLegacyRootCookie(response, name));
   response.headers.set("Cache-Control", "private, no-store, max-age=0");
   return response;
 }

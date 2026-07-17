@@ -3,10 +3,11 @@ import "server-only";
 import { cookies } from "next/headers";
 
 import { backendFetch } from "@/lib/backend";
+import { DEMO_TOKEN_COOKIE } from "@/lib/demo-cookie";
 import { createClient } from "@/lib/supabase/server";
 import type { CurrentUser } from "@/lib/types";
 
-export const DEMO_TOKEN_COOKIE = "careersignals-demo-token";
+export { DEMO_TOKEN_COOKIE } from "@/lib/demo-cookie";
 
 export async function getServerAuthorization(): Promise<string | null> {
   const cookieStore = await cookies();

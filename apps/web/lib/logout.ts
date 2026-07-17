@@ -2,8 +2,8 @@ import "server-only";
 
 import { cookies } from "next/headers";
 
-import { DEMO_TOKEN_COOKIE } from "@/lib/auth";
 import { clearAppCookie } from "@/lib/cookie-policy";
+import { DEMO_TOKEN_COOKIE_NAMES } from "@/lib/demo-cookie";
 import { RECOVERY_INTENT_COOKIE_NAME } from "@/lib/password-recovery";
 import { clearRecoveryCookies } from "@/lib/password-recovery-server";
 import { createWritableRecoveryClient } from "@/lib/supabase/recovery-server";
@@ -29,6 +29,6 @@ export async function clearAuthenticationSession() {
     // Continue clearing the ordinary application-scoped cookies.
   }
   const cookieStore = await cookies();
-  clearAppCookie(cookieStore, DEMO_TOKEN_COOKIE);
+  DEMO_TOKEN_COOKIE_NAMES.forEach((name) => clearAppCookie(cookieStore, name));
   clearAppCookie(cookieStore, RECOVERY_INTENT_COOKIE_NAME);
 }

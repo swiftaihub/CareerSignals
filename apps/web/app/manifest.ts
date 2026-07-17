@@ -13,6 +13,12 @@ export default function manifest(): MetadataRoute.Manifest {
     scope: `${basePath}/` || "/",
     display: "standalone",
     background_color: "#ffffff",
-    theme_color: "#0f766e"
+    theme_color: "#0f766e",
+    icons: [{
+      src: withBasePath("/careersignals-icon.svg"),
+      sizes: "any",
+      type: "image/svg+xml",
+      purpose: "any"
+    }]
   };
 }

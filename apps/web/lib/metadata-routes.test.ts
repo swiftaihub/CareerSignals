@@ -33,7 +33,12 @@ describe("base-aware metadata routes", () => {
     expect(manifest()).toMatchObject({
       id: "/careersignals",
       start_url: "/careersignals",
-      scope: "/careersignals/"
+      scope: "/careersignals/",
+      icons: [expect.objectContaining({
+        src: "/careersignals/careersignals-icon.svg",
+        sizes: "any",
+        type: "image/svg+xml"
+      })]
     });
   });
 });

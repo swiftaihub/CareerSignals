@@ -40,7 +40,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/lib/auth", () => ({
-  DEMO_TOKEN_COOKIE: "careersignals-demo-token",
+  DEMO_TOKEN_COOKIE: "careersignals-demo-token-v2",
   getCurrentUser: vi.fn()
 }));
 

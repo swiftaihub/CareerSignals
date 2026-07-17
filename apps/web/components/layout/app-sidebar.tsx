@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 
 import { AUTHENTICATED_NAV_ITEMS } from "@/lib/navigation";
+import { withBasePath } from "@/lib/app-path";
 import type { CurrentUser } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -41,7 +42,11 @@ export function AppSidebar({ user }: { user?: CurrentUser | null }) {
   const items = user?.role === "admin" ? [...navItems, ...adminItems] : navItems;
   return (
     <aside className="hidden w-64 shrink-0 border-r border-border bg-card/95 px-4 py-5 lg:block">
-      <Link href="/" className="flex items-center gap-3 rounded-lg px-2 py-2">
+      <a
+        aria-label="CareerSignals home"
+        className="flex items-center gap-3 rounded-lg px-2 py-2"
+        href={withBasePath("/")}
+      >
         <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary text-primary-foreground">
           CS
         </div>
@@ -49,7 +54,7 @@ export function AppSidebar({ user }: { user?: CurrentUser | null }) {
           <div className="text-sm font-bold">CareerSignals</div>
           <div className="text-xs text-muted-foreground">Personal intelligence</div>
         </div>
-      </Link>
+      </a>
 
       <nav className="mt-6 space-y-1">
         {items.map((item) => {

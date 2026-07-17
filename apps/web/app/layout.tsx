@@ -2,7 +2,7 @@ import "./globals.css";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
-import { getAppUrl } from "@/lib/app-path";
+import { getAppUrl, withBasePath } from "@/lib/app-path";
 
 const appUrl = getAppUrl();
 const title = "CareerSignals";
@@ -13,6 +13,10 @@ export const metadata: Metadata = {
   title,
   description,
   alternates: { canonical: appUrl },
+  icons: {
+    icon: [{ url: withBasePath("/careersignals-icon.svg"), type: "image/svg+xml" }],
+    shortcut: [withBasePath("/careersignals-icon.svg")]
+  },
   openGraph: {
     type: "website",
     url: appUrl,

@@ -11,6 +11,7 @@ import {
   clearAppCookie,
   secureAppCookieOptions
 } from "@/lib/cookie-policy";
+import { DEMO_TOKEN_COOKIE_NAMES } from "@/lib/demo-cookie";
 import { safeRedirectPath } from "@/lib/navigation";
 import { clearAuthenticationSession } from "@/lib/logout";
 import {
@@ -52,6 +53,10 @@ const registerSchema = z.object({
   password: passwordSchema
 });
 
+function clearDemoCookies(cookieStore: Awaited<ReturnType<typeof cookies>>) {
+  DEMO_TOKEN_COOKIE_NAMES.forEach((name) => clearAppCookie(cookieStore, name));
+}
+
 async function createDemoSession() {
   const response = await backendFetch("/api/auth/demo-session", { method: "POST" });
   if (!response.ok) {
@@ -60,6 +65,7 @@ async function createDemoSession() {
   const payload = await response.json() as { demo_token: string; expires_at: string };
   const expiresAt = new Date(payload.expires_at);
   const cookieStore = await cookies();
+  clearDemoCookies(cookieStore);
   try {
     // Demo is a deliberate lower-privilege mode. Clear any local Supabase session
     // so an existing authenticated cookie cannot shadow the signed Demo identity.
@@ -130,7 +136,7 @@ export async function loginAction(_state: AuthActionState, formData: FormData): 
   if (error) {
     return { error: "Your session could not be established.", errorCode: "INVALID_SESSION" };
   }
-  clearAppCookie(await cookies(), DEMO_TOKEN_COOKIE);
+  clearDemoCookies(await cookies());
   redirect(buildAppUrl(safeRedirectPath(formData.get("next"))));
 }
 
@@ -254,7 +260,7 @@ export async function resetPasswordAction(
 
   await clearRecoveryCookies();
   const cookieStore = await cookies();
-  clearAppCookie(cookieStore, DEMO_TOKEN_COOKIE);
+  clearDemoCookies(cookieStore);
   clearAppCookie(cookieStore, RECOVERY_INTENT_COOKIE_NAME);
   try {
     const normalClient = await createClient();
@@ -275,7 +281,7 @@ export async function cancelPasswordRecoveryAction() {
   }
   await clearRecoveryCookies();
   const cookieStore = await cookies();
-  clearAppCookie(cookieStore, DEMO_TOKEN_COOKIE);
+  clearDemoCookies(cookieStore);
   try {
     const normalClient = await createClient();
     await normalClient.auth.signOut({ scope: "local" });
@@ -355,7 +361,7 @@ export async function changePasswordAction(
     // The server-side auth cookie adapter normally clears local state as part
     // of global sign-out; recovery/demo cookies are still removed explicitly.
   }
-  clearAppCookie(cookieStore, DEMO_TOKEN_COOKIE);
+  clearDemoCookies(cookieStore);
   await clearRecoveryCookies();
   redirect(buildAppUrl("/login?password_changed=success"));
 }
