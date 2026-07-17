@@ -79,3 +79,17 @@ def test_backend_health_check_is_bound_to_the_release_source_sha() -> None:
 
     assert 'expected_source_sha="$(basename "$release_dir")"' in script
     assert 'payload.get("source_commit_sha") != os.environ["EXPECTED_SOURCE_SHA"]' in script
+
+
+def test_duckdb_extension_tmpfs_allows_native_motherduck_loading() -> None:
+    compose = _read("deployment/backend/docker-compose.production.yml")
+    mount = next(
+        line.strip()
+        for line in compose.splitlines()
+        if "/home/careersignals/.duckdb:" in line
+    )
+
+    assert ":rw,exec,nosuid,nodev," in mount
+    assert "noexec" not in mount
+    assert "/tmp:rw,noexec,nosuid" in compose
+    assert "/app/dbt/target:rw,noexec,nosuid" in compose

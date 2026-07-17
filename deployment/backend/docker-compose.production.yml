@@ -14,7 +14,9 @@ x-application-service: &application-service
   tmpfs:
     - /tmp:rw,noexec,nosuid,size=128m
     - /run/careersignals:rw,noexec,nosuid,size=4m,uid=10001,gid=10001
-    - /home/careersignals/.duckdb:rw,noexec,nosuid,size=512m,uid=10001,gid=10001
+    # DuckDB maps the downloaded MotherDuck extension from this directory.
+    # Keep the mount narrow, ephemeral, unprivileged, and executable.
+    - /home/careersignals/.duckdb:rw,exec,nosuid,nodev,size=512m,uid=10001,gid=10001
     - /app/dbt/logs:rw,noexec,nosuid,size=64m,uid=10001,gid=10001
     - /app/dbt/target:rw,noexec,nosuid,size=256m,uid=10001,gid=10001
   stop_grace_period: 45s

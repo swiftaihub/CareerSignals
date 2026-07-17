@@ -31,6 +31,7 @@ def _reset_heartbeat() -> None:
 def test_worker_main_uses_worker_validation_and_heartbeat(monkeypatch) -> None:
     _reset_heartbeat()
     validations: list[str] = []
+    runtime_checks: list[str] = []
     settings = SimpleNamespace(
         require_worker_configuration=lambda: validations.append("worker"),
         log_level="INFO",
@@ -43,13 +44,48 @@ def test_worker_main_uses_worker_validation_and_heartbeat(monkeypatch) -> None:
         lambda: CapturingHeartbeat(),
     )
     monkeypatch.setattr(worker_main.threading, "Event", AlreadyStoppedEvent)
+    monkeypatch.setattr(
+        worker_main,
+        "verify_worker_runtime",
+        lambda: runtime_checks.append("motherduck"),
+    )
     monkeypatch.setattr(worker_main, "ConnectorRefreshWorker", lambda **_kwargs: object())
     monkeypatch.setattr(worker_main, "UserPipelineWorker", lambda **_kwargs: object())
 
     worker_main.main()
 
     assert validations == ["worker"]
+    assert runtime_checks == ["motherduck"]
     assert (CapturingHeartbeat.entered, CapturingHeartbeat.exited) == (1, 1)
+
+
+def test_worker_runtime_requires_a_successful_motherduck_query(monkeypatch) -> None:
+    statements: list[str] = []
+
+    class Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc_info):
+            return None
+
+        def execute(self, statement: str):
+            statements.append(statement)
+            return self
+
+        @staticmethod
+        def fetchone():
+            return (1,)
+
+    monkeypatch.setattr(
+        worker_main,
+        "MotherDuckService",
+        lambda: SimpleNamespace(connect=Connection),
+    )
+
+    worker_main.verify_worker_runtime()
+
+    assert statements == ["select 1"]
 
 
 def test_scheduler_main_uses_scheduler_validation_and_heartbeat(monkeypatch) -> None:

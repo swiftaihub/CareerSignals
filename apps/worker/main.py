@@ -7,13 +7,24 @@ import threading
 
 from packages.careersignal_core.heartbeat import FileHeartbeat
 from packages.careersignal_core.settings import get_settings
+from packages.careersignal_core.storage.motherduck import MotherDuckService
 from packages.careersignal_core.tasks.connector_refresh_worker import ConnectorRefreshWorker
 from packages.careersignal_core.tasks.user_pipeline_worker import UserPipelineWorker
+
+
+def verify_worker_runtime() -> None:
+    """Prove the analytics dependency is usable before reporting a heartbeat."""
+
+    with MotherDuckService().connect() as connection:
+        row = connection.execute("select 1").fetchone()
+    if row is None or row[0] != 1:
+        raise RuntimeError("MotherDuck readiness query did not return the expected result")
 
 
 def main() -> None:
     settings = get_settings()
     settings.require_worker_configuration()
+    verify_worker_runtime()
     logging.basicConfig(level=settings.log_level)
     with FileHeartbeat.from_environment():
         stop_event = threading.Event()

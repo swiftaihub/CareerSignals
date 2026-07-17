@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildAppUrl,
   buildAuthCallbackUrl,
   getAppUrl,
   getBasePath,
@@ -63,6 +64,19 @@ describe("base-path helpers", () => {
 });
 
 describe("internal redirects", () => {
+  it("builds an absolute application URL with exactly one base path", () => {
+    expect(buildAppUrl(
+      "/careersignals/dashboard?from=login",
+      "https://jobs.swiftaihub.com",
+      "/careersignals"
+    )).toBe("https://jobs.swiftaihub.com/careersignals/dashboard?from=login");
+    expect(buildAppUrl(
+      "/",
+      "https://jobs.swiftaihub.com",
+      "/careersignals"
+    )).toBe("https://jobs.swiftaihub.com/careersignals");
+  });
+
   it("normalizes logical and base-prefixed inputs without double-prefixing", () => {
     expect(sanitizeInternalRedirect("/jobs?page=2#results", "/dashboard", "/careersignals"))
       .toBe("/jobs?page=2#results");

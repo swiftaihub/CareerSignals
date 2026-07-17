@@ -255,12 +255,14 @@ The Compose template runs application services as image user/group `10001`, with
 - read-only root filesystems;
 - all Linux capabilities dropped;
 - `no-new-privileges`;
-- writable size-limited `tmpfs` paths only for `/tmp`, heartbeats, DuckDB client state, and dbt logs/target;
+- writable size-limited `tmpfs` paths only for `/tmp`, heartbeats, DuckDB client state, and dbt logs/target; all remain `noexec` except the narrow `.duckdb` mount, which is `exec,nosuid,nodev` because DuckDB must map the native MotherDuck extension stored there;
 - an init process and 45-second stop grace period;
 - `restart: unless-stopped`;
 - a private bridge network and no Worker/Scheduler ports.
 
 The reverse proxy is also read-only, drops all capabilities except `NET_BIND_SERVICE`, and mounts TLS material read-only. Review every new volume or capability as a security boundary change.
+
+The Worker performs a read-only MotherDuck readiness query before starting its heartbeat. A missing token, blocked extension load, or unavailable analytics database therefore keeps the Worker unhealthy and prevents a release from being marked healthy.
 
 ## Health and release verification
 
