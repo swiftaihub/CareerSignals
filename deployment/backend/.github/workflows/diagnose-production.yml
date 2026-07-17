@@ -46,9 +46,9 @@ jobs:
           set -euo pipefail
           remote="$ORACLE_SSH_USER@$ORACLE_HOST"
           ssh -o BatchMode=yes "$remote" \
-            "cd '$ORACLE_DEPLOY_PATH/current' && docker compose --env-file release.env -f docker-compose.production.yml ps"
+            "cd '$ORACLE_DEPLOY_PATH/current' && sudo -n -- docker compose --env-file release.env -f docker-compose.production.yml ps"
           ssh -o BatchMode=yes "$remote" \
-            "cd '$ORACLE_DEPLOY_PATH/current' && docker compose --env-file release.env -f docker-compose.production.yml exec -T api python -" <<'PY'
+            "cd '$ORACLE_DEPLOY_PATH/current' && sudo -n -- docker compose --env-file release.env -f docker-compose.production.yml exec -T api python -" <<'PY'
           from __future__ import annotations
 
           from datetime import date, datetime
@@ -139,7 +139,7 @@ jobs:
           set -euo pipefail
           remote="$ORACLE_SSH_USER@$ORACLE_HOST"
           ssh -o BatchMode=yes "$remote" \
-            "cd '$ORACLE_DEPLOY_PATH/current' && docker compose --env-file release.env -f docker-compose.production.yml logs --since 24h --tail 4000 api worker scheduler 2>&1" \
+            "cd '$ORACLE_DEPLOY_PATH/current' && sudo -n -- docker compose --env-file release.env -f docker-compose.production.yml logs --since 24h --tail 4000 api worker scheduler 2>&1" \
             | grep -E '(^|[^A-Za-z])(ERROR|Error|Exception|Traceback|failed|Failed|Global connector refresh|User pipeline run|worker started)([^A-Za-z]|$)' \
             | tail -n 500 \
             || true
