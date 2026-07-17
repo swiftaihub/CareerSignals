@@ -150,6 +150,8 @@ The production files have different responsibilities:
 - `api.env`: PostgreSQL, Supabase URL/service/JWT configuration, Demo signing, CORS, API quotas/freshness, logging.
 - `worker.env`: PostgreSQL, MotherDuck, dbt `prod`, approved Connector sources/credentials, queue polling and writer concurrency.
 - `scheduler.env`: PostgreSQL, cron, timezone, trigger mode, logging. No Supabase, MotherDuck, dbt, Demo, or Connector credentials.
+
+The identity represented by `MOTHERDUCK_TOKEN` must own or have shared access to the exact database named by `MOTHERDUCK_DATABASE` (production uses `CareerSignal`). A syntactically valid token is insufficient if that database is unavailable to its identity; the Worker readiness gate intentionally rejects that release instead of accepting a process that cannot execute global or personal refreshes.
 - `migration.env`: direct production database URI and project reference. No application runtime secrets beyond what migration requires.
 
 The Dockerfile supplies `/app/dbt` for both dbt directories. Compose supplies separate heartbeat paths in an in-memory `/run/careersignals` filesystem and fixes initial Worker concurrency to one. Do not add host storage for local outputs, spreadsheets, or a DuckDB database; production analytics uses MotherDuck and the serving layer is PostgreSQL.
