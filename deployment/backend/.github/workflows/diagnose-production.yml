@@ -1,0 +1,145 @@
+name: Diagnose CareerSignals production
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: careersignals-backend-production-diagnostics
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+    env:
+      ORACLE_HOST: ${{ vars.ORACLE_HOST }}
+      ORACLE_SSH_USER: ${{ vars.ORACLE_SSH_USER }}
+      ORACLE_DEPLOY_PATH: ${{ vars.ORACLE_DEPLOY_PATH }}
+
+    steps:
+      - name: Validate production target
+        run: |
+          set -euo pipefail
+          [[ "$ORACLE_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || { echo "ORACLE_HOST is missing or invalid." >&2; exit 1; }
+          [[ "$ORACLE_SSH_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]] || { echo "ORACLE_SSH_USER is missing or invalid." >&2; exit 1; }
+          test "$ORACLE_DEPLOY_PATH" = "/opt/careersignals" || { echo "ORACLE_DEPLOY_PATH must be exactly /opt/careersignals." >&2; exit 1; }
+
+      - name: Prepare pinned SSH host verification
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.ORACLE_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.ORACLE_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$SSH_PRIVATE_KEY" || { echo "ORACLE_SSH_PRIVATE_KEY is missing." >&2; exit 1; }
+          test -n "$SSH_KNOWN_HOSTS" || { echo "ORACLE_SSH_KNOWN_HOSTS is missing." >&2; exit 1; }
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"
+
+      - name: Inspect container and refresh state
+        run: |
+          set -euo pipefail
+          remote="$ORACLE_SSH_USER@$ORACLE_HOST"
+          ssh -o BatchMode=yes "$remote" \
+            "cd '$ORACLE_DEPLOY_PATH/current' && docker compose -f docker-compose.production.yml ps"
+          ssh -o BatchMode=yes "$remote" \
+            "cd '$ORACLE_DEPLOY_PATH/current' && docker compose -f docker-compose.production.yml exec -T api python -" <<'PY'
+          from __future__ import annotations
+
+          from datetime import date, datetime
+          from decimal import Decimal
+          import json
+          from typing import Any
+
+          from packages.careersignal_core.storage.postgres import PostgresStore
+
+
+          def safe(value: Any) -> Any:
+              if isinstance(value, (datetime, date)):
+                  return value.isoformat()
+              if isinstance(value, Decimal):
+                  return float(value)
+              return value
+
+
+          store = PostgresStore()
+          connector_runs = store.fetch_all(
+              """
+              select status::text as status, trigger_type, created_at, started_at,
+                     completed_at, error_code, public_status_message,
+                     case when started_at is null then null
+                          else extract(epoch from (coalesce(completed_at, now()) - started_at))::bigint
+                     end as elapsed_seconds
+              from public.connector_refresh_runs
+              order by created_at desc
+              limit 10
+              """
+          )
+          user_run_summary = store.fetch_all(
+              """
+              select status::text as status, count(*)::integer as count,
+                     max(submitted_at) as latest_submitted_at,
+                     max(
+                       case when started_at is null then null
+                            else extract(epoch from (coalesce(completed_at, now()) - started_at))::bigint
+                       end
+                     ) as max_elapsed_seconds
+              from public.user_pipeline_runs
+              where submitted_at >= now() - interval '24 hours'
+              group by status
+              order by status
+              """
+          )
+          recent_user_failures = store.fetch_all(
+              """
+              select submitted_at, started_at, completed_at, error_code, public_error_message
+              from public.user_pipeline_runs
+              where status = 'failed' and submitted_at >= now() - interval '24 hours'
+              order by submitted_at desc
+              limit 10
+              """
+          )
+          integrity = store.fetch_one(
+              """
+              select
+                (select count(*)::integer
+                   from public.user_pipeline_runs
+                  where status in ('waiting_for_global', 'queued', 'running')) as active_user_runs,
+                (select count(*)::integer
+                   from public.connector_refresh_runs
+                  where status in ('queued', 'running')) as active_connector_runs,
+                (select count(*)::integer
+                   from public.user_job_matches matches
+                   left join public.job_postings jobs on jobs.job_id = matches.job_id
+                  where matches.is_current = true and jobs.job_id is null) as orphan_current_matches,
+                (select count(distinct user_uuid)::integer
+                   from public.user_pipeline_runs
+                  where is_current_result = true) as users_with_current_results,
+                (select count(*)::integer
+                   from public.user_job_matches
+                  where is_current = true) as current_match_rows
+              """
+          ) or {}
+          payload = {
+              "connector_runs": connector_runs,
+              "user_runs_24h": user_run_summary,
+              "recent_user_failures_24h": recent_user_failures,
+              "serving_integrity": integrity,
+          }
+          print(json.dumps(payload, default=safe, indent=2, sort_keys=True))
+          PY
+
+      - name: Inspect filtered application errors
+        run: |
+          set -euo pipefail
+          remote="$ORACLE_SSH_USER@$ORACLE_HOST"
+          ssh -o BatchMode=yes "$remote" \
+            "cd '$ORACLE_DEPLOY_PATH/current' && docker compose -f docker-compose.production.yml logs --since 24h --tail 4000 api worker scheduler 2>&1" \
+            | grep -E '(^|[^A-Za-z])(ERROR|Error|Exception|Traceback|failed|Failed|Global connector refresh|User pipeline run|worker started)([^A-Za-z]|$)' \
+            | tail -n 500 \
+            || true
