@@ -13,7 +13,9 @@ report_service_failure() {
   local marker="/tmp/careersignals-health-${expected_source_sha}-${service}.logged"
 
   echo "$service $reason" >&2
-  if [[ ! -e "$marker" ]]; then
+  # A service may legitimately report "starting" before it has emitted useful
+  # output. Preserve the one-time diagnostic for a terminal health/state failure.
+  if [[ "$reason" != "health is starting" && ! -e "$marker" ]]; then
     umask 077
     : >"$marker"
     echo "Last $service logs (credentials redacted):" >&2

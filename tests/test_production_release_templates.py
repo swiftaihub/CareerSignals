@@ -88,6 +88,7 @@ def test_backend_health_check_reports_bounded_redacted_service_logs_once() -> No
     assert "credentials redacted" in script
     assert "[REDACTED]" in script
     assert 'careersignals-health-${expected_source_sha}-${service}.logged' in script
+    assert '"$reason" != "health is starting"' in script
 
 
 def test_duckdb_extension_tmpfs_allows_native_motherduck_loading() -> None:
