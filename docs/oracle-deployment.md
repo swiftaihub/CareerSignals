@@ -151,7 +151,7 @@ The production files have different responsibilities:
 - `worker.env`: PostgreSQL, MotherDuck, dbt `prod`, approved Connector sources/credentials, queue polling and writer concurrency.
 - `scheduler.env`: PostgreSQL, cron, timezone, trigger mode, logging. No Supabase, MotherDuck, dbt, Demo, or Connector credentials.
 
-The per-user daily submission quota is API-owned. Production requires `USER_PIPELINE_DAILY_LIMIT=2` in `api.env`; do not place it in `worker.env`, where it cannot protect the enqueue endpoint.
+The per-user daily submission quota is API-owned. Production requires `USER_PIPELINE_DAILY_LIMIT=4` in `api.env`; do not place it in `worker.env`, where it cannot protect the enqueue endpoint.
 
 The identity represented by `MOTHERDUCK_TOKEN` must own or have shared access to the exact database named by `MOTHERDUCK_DATABASE` (production uses `CareerSignal`). A syntactically valid token is insufficient if that database is unavailable to its identity; the Worker readiness gate intentionally rejects that release instead of accepting a process that cannot execute global or personal refreshes.
 - `migration.env`: direct production database URI and project reference. No application runtime secrets beyond what migration requires.

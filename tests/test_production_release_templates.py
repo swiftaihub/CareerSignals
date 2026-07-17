@@ -108,6 +108,6 @@ def test_duckdb_extension_tmpfs_allows_native_motherduck_loading() -> None:
 def test_production_daily_pipeline_limit_is_owned_by_the_api() -> None:
     verifier = _read("deployment/backend/scripts/verify-environment.sh")
 
-    assert 'require_exact "$api_env" USER_PIPELINE_DAILY_LIMIT 2' in verifier
+    assert 'require_exact "$api_env" USER_PIPELINE_DAILY_LIMIT 4' in verifier
     assert 'forbid_key "$worker_env" USER_PIPELINE_DAILY_LIMIT' in verifier
     assert 'require_exact "$worker_env" USER_PIPELINE_MAX_CONCURRENCY 1' in verifier
