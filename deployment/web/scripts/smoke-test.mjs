@@ -1,3 +1,5 @@
+import { containsMixedContent, requestWithRetry } from "./smoke-test-helpers.mjs";
+
 const origin = (process.env.APP_ORIGIN || "https://jobs.swiftaihub.com").replace(/\/$/, "");
 const basePath = normalizeBasePath(process.env.APP_BASE_PATH || "/careersignals");
 const appUrl = `${origin}${basePath}`;
@@ -18,12 +20,14 @@ const guardedPaths = [
 ];
 
 for (const path of publicPaths) {
-  const response = await request(`${appUrl}${path}`);
+  const response = await requestWithRetry(`${appUrl}${path}`);
   if (response.status < 200 || response.status >= 300) {
     fail(`${path || "/"} returned ${response.status}`);
   }
   const body = await response.text();
-  if (requireHttpsAssets && /http:\/\//i.test(body)) fail(`${path || "/"} contains mixed-content HTTP URLs`);
+  if (requireHttpsAssets && containsMixedContent(body)) {
+    fail(`${path || "/"} contains mixed-content HTTP URLs`);
+  }
   if (body.includes(`${basePath}${basePath}`)) fail(`${path || "/"} contains a duplicate base path`);
   if (/\b(?:href|src)=["']\/(?!careersignals(?:\/|["'#?]))/i.test(body)) {
     fail(`${path || "/"} contains an application-root URL outside the base path`);
@@ -31,7 +35,7 @@ for (const path of publicPaths) {
 }
 
 for (const path of guardedPaths) {
-  const response = await request(`${appUrl}${path}`);
+  const response = await requestWithRetry(`${appUrl}${path}`);
   if (response.status < 300 || response.status >= 400) {
     fail(`${path} must redirect an unauthenticated request; received ${response.status}`);
   }
@@ -43,7 +47,7 @@ for (const path of guardedPaths) {
   }
 }
 
-const callback = await request(`${appUrl}/auth/callback`);
+const callback = await requestWithRetry(`${appUrl}/auth/callback`);
 if (callback.status < 300 || callback.status >= 400) {
   fail(`/auth/callback without a code must redirect safely; received ${callback.status}`);
 }
@@ -54,7 +58,7 @@ if (callbackDestination.pathname !== `${basePath}/forgot-password`) {
   fail(`/auth/callback without a code must redirect to ${basePath}/forgot-password`);
 }
 
-const health = await request(`${appUrl}/api/backend/api/health`);
+const health = await requestWithRetry(`${appUrl}/api/backend/api/health`);
 if (!health.ok) fail(`same-origin BFF health returned ${health.status}`);
 if (expectedSourceSha) {
   let payload;
@@ -69,13 +73,6 @@ if (expectedSourceSha) {
 }
 
 console.log(`Production smoke tests passed for ${appUrl}.`);
-
-async function request(url) {
-  return fetch(url, {
-    redirect: "manual",
-    headers: { "user-agent": "CareerSignals deployment smoke test" }
-  });
-}
 
 function assertInternalLocation(location, sourcePath) {
   const destination = new URL(location, origin);

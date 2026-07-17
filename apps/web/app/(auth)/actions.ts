@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
-import { buildAuthCallbackUrl, getCookiePath, withBasePath } from "@/lib/app-path";
+import { buildAuthCallbackUrl, getCookiePath } from "@/lib/app-path";
 import { DEMO_TOKEN_COOKIE, getCurrentUser } from "@/lib/auth";
 import { backendFetch, readBackendError } from "@/lib/backend";
 import {
@@ -95,7 +95,7 @@ export async function loginAction(_state: AuthActionState, formData: FormData): 
     if (result.error) {
       return { error: result.error.detail, errorCode: result.error.error_code };
     }
-    redirect(withBasePath(safeRedirectPath(formData.get("next"))));
+    redirect(safeRedirectPath(formData.get("next")));
   }
 
   let response: Response;
@@ -130,7 +130,7 @@ export async function loginAction(_state: AuthActionState, formData: FormData): 
     return { error: "Your session could not be established.", errorCode: "INVALID_SESSION" };
   }
   clearAppCookie(await cookies(), DEMO_TOKEN_COOKIE);
-  redirect(withBasePath(safeRedirectPath(formData.get("next"))));
+  redirect(safeRedirectPath(formData.get("next")));
 }
 
 export async function registerAction(_state: AuthActionState, formData: FormData): Promise<AuthActionState> {
@@ -157,7 +157,7 @@ export async function registerAction(_state: AuthActionState, formData: FormData
     const error = await readBackendError(response);
     return { error: error.detail, errorCode: error.error_code };
   }
-  redirect(withBasePath("/pending?registered=1"));
+  redirect("/pending?registered=1");
 }
 
 export async function forgotPasswordAction(
@@ -262,7 +262,7 @@ export async function resetPasswordAction(
     // The isolated recovery credentials are already cleared. This only removes
     // a pre-existing ordinary session from the current browser when present.
   }
-  redirect(withBasePath("/login?password_reset=success"));
+  redirect("/login?password_reset=success");
 }
 
 export async function cancelPasswordRecoveryAction() {
@@ -281,7 +281,7 @@ export async function cancelPasswordRecoveryAction() {
   } catch {
     // Returning to sign in must still work when Supabase is unavailable.
   }
-  redirect(withBasePath("/login"));
+  redirect("/login");
 }
 
 export async function changePasswordAction(
@@ -356,15 +356,15 @@ export async function changePasswordAction(
   }
   clearAppCookie(cookieStore, DEMO_TOKEN_COOKIE);
   await clearRecoveryCookies();
-  redirect(withBasePath("/login?password_changed=success"));
+  redirect("/login?password_changed=success");
 }
 
 export async function demoAction() {
   const result = await createDemoSession();
   if (result.error) {
-    redirect(withBasePath(`/login?error=${encodeURIComponent(result.error.error_code || "DEMO_UNAVAILABLE")}`));
+    redirect(`/login?error=${encodeURIComponent(result.error.error_code || "DEMO_UNAVAILABLE")}`);
   }
-  redirect(withBasePath("/dashboard"));
+  redirect("/dashboard");
 }
 
 export async function logoutAction() {
@@ -380,5 +380,5 @@ export async function logoutAction() {
   const cookieStore = await cookies();
   clearAppCookie(cookieStore, DEMO_TOKEN_COOKIE);
   clearAppCookie(cookieStore, RECOVERY_INTENT_COOKIE_NAME);
-  redirect(withBasePath("/"));
+  redirect("/");
 }
