@@ -81,6 +81,15 @@ def test_backend_health_check_is_bound_to_the_release_source_sha() -> None:
     assert 'payload.get("source_commit_sha") != os.environ["EXPECTED_SOURCE_SHA"]' in script
 
 
+def test_backend_health_check_reports_bounded_redacted_service_logs_once() -> None:
+    script = _read("deployment/backend/scripts/health-check.sh")
+
+    assert '--tail 80 "$service"' in script
+    assert "credentials redacted" in script
+    assert "[REDACTED]" in script
+    assert 'careersignals-health-${expected_source_sha}-${service}.logged' in script
+
+
 def test_duckdb_extension_tmpfs_allows_native_motherduck_loading() -> None:
     compose = _read("deployment/backend/docker-compose.production.yml")
     mount = next(
