@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RegisterForm } from "./register-form";
 import { TopNav } from "../layout/top-nav";
+import { withBasePath } from "@/lib/app-path";
 import type { CurrentUser } from "@/lib/types";
 
 vi.mock("@/app/(auth)/actions", () => ({
@@ -39,7 +40,7 @@ describe("existing authentication UI", () => {
 
     const button = screen.getByRole("button", { name: "Log out" });
     expect(button).toBeEnabled();
-    expect(button.closest("form")).toHaveAttribute("action", "/auth/logout");
+    expect(button.closest("form")).toHaveAttribute("action", withBasePath("/auth/logout"));
     expect(button.closest("form")).toHaveAttribute("method", "post");
   });
 });
