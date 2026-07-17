@@ -200,7 +200,10 @@ jobs:
           helper=/usr/local/sbin/careersignals-install-release
           local_helper_hash="$(sha256sum scripts/install-release.sh | awk '{print $1}')"
           remote_helper_hash="$(ssh -o BatchMode=yes "$remote" sha256sum "$helper" | awk '{print $1}')"
-          remote_helper_metadata="$(ssh -o BatchMode=yes "$remote" stat -c '%U:%G %a' "$helper")"
+          remote_helper_metadata="$(
+            ssh -o BatchMode=yes "$remote" \
+              "stat -c '%U:%G %a' -- '$helper'"
+          )"
           test "$remote_helper_hash" = "$local_helper_hash" || {
             echo "The root-owned Oracle installer does not match this reviewed release; owner update is required." >&2
             exit 1
