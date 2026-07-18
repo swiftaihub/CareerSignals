@@ -38,6 +38,10 @@ services:
     environment:
       PYTHONUNBUFFERED: "1"
       PYTHONDONTWRITEBYTECODE: "1"
+      # Temporarily keep first-user requests on the last successful shared
+      # dataset. The bootstrap implementation remains available through the
+      # first_user_bootstrap/both modes outside this production override.
+      CONNECTOR_REFRESH_TRIGGER_MODE: "scheduled"
     expose:
       - "8000"
     healthcheck:

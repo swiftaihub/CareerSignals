@@ -118,3 +118,9 @@ def test_production_worker_bounds_and_parallelizes_connector_refreshes() -> None
 
     assert 'CONNECTOR_REFRESH_MAX_SECONDS: "1800"' in compose
     assert 'CONNECTOR_SOURCE_MAX_CONCURRENCY: "5"' in compose
+
+
+def test_production_api_disables_first_user_bootstrap_without_removing_it() -> None:
+    compose = _read("deployment/backend/docker-compose.production.yml")
+
+    assert 'CONNECTOR_REFRESH_TRIGGER_MODE: "scheduled"' in compose
