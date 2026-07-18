@@ -1,4 +1,6 @@
 export const HOME_ROUTES = {
+  home: "/",
+  howItWorks: "/#how-it-works",
   register: "/register",
   login: "/login",
   pricing: "/pricing",

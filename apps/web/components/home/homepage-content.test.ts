@@ -11,6 +11,8 @@ import {
 describe("public homepage content contracts", () => {
   it("preserves the public authentication and product routes", () => {
     expect(HOME_ROUTES).toEqual({
+      home: "/",
+      howItWorks: "/#how-it-works",
       register: "/register",
       login: "/login",
       pricing: "/pricing",
