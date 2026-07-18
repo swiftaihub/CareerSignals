@@ -73,4 +73,26 @@ describe("stable logout route", () => {
     expect(response.status).toBe(403);
     expect(mocks.clearAuthenticationSession).not.toHaveBeenCalled();
   });
+
+  it("derives the mounted cookie path from the request when the runtime binding is absent", async () => {
+    delete process.env.NEXT_PUBLIC_BASE_PATH;
+    const request = new NextRequest("https://jobs.swiftaihub.com/careersignals/auth/logout", {
+      method: "POST",
+      headers: {
+        cookie: "careersignals-demo-token-v2=stuck-demo",
+        origin: "https://jobs.swiftaihub.com"
+      }
+    });
+
+    const response = await POST(request);
+    const setCookies = response.headers.getSetCookie().join("\n");
+
+    expect(response.status).toBe(303);
+    expect(setCookies).toContain(
+      "careersignals-demo-token-v2=; Path=/careersignals;"
+    );
+    expect(setCookies).toContain(
+      "careersignals-demo-token-v2=; Path=/;"
+    );
+  });
 });

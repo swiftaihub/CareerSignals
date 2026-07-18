@@ -1,6 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowRight, CheckCircle2, LogIn, Play, Sparkles } from "lucide-react";
+import { ArrowRight, CheckCircle2, ChevronDown, LogIn, Play, Sparkles } from "lucide-react";
 
 import { demoAction } from "@/app/(auth)/actions";
 import { withBasePath } from "@/lib/app-path";
@@ -13,7 +13,7 @@ export function HeroSection() {
     <section className="landing-hero landing-mesh surface-grid relative overflow-hidden border-b border-slate-200/70">
       <div className="hero-orb hero-orb-one" aria-hidden="true" />
       <div className="hero-orb hero-orb-two" aria-hidden="true" />
-      <div className="mx-auto grid max-w-[90rem] gap-12 px-4 pb-7 pt-14 sm:px-6 sm:pb-8 lg:grid-cols-[0.88fr_1.12fr] lg:items-center lg:px-10 lg:pb-8 lg:pt-20 xl:gap-16">
+      <div className="mx-auto grid max-w-[90rem] gap-12 px-4 pb-20 pt-14 sm:px-6 sm:pb-20 lg:grid-cols-[0.88fr_1.12fr] lg:items-center lg:px-10 lg:pb-20 lg:pt-20 xl:gap-16">
         <div className="relative z-10 max-w-2xl">
           <div className="hero-enter hero-delay-1 section-eyebrow">
             <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
@@ -63,6 +63,14 @@ export function HeroSection() {
           <FloatingProductPreview />
         </div>
       </div>
+      <a
+        aria-label="Scroll to explore more"
+        className="hero-scroll-cue"
+        href="#why-careersignals"
+      >
+        <span>Scroll to explore</span>
+        <ChevronDown className="h-4 w-4" aria-hidden="true" />
+      </a>
     </section>
   );
 }

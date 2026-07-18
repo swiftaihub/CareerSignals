@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { containsMixedContent, requestWithRetry } from "./smoke-test-helpers.mjs";
+import {
+  containsDuplicateBasePath,
+  containsMixedContent,
+  requestWithRetry
+} from "./smoke-test-helpers.mjs";
 
 describe("containsMixedContent", () => {
   it("ignores non-fetching HTTP namespace declarations", () => {
@@ -16,6 +20,22 @@ describe("containsMixedContent", () => {
     '<div style="background-image: url(http://example.com/image.png)"></div>'
   ])("detects mixed content in browser-fetching URLs", (body) => {
     expect(containsMixedContent(body)).toBe(true);
+  });
+});
+
+describe("containsDuplicateBasePath", () => {
+  it("detects a duplicated mounted route", () => {
+    expect(containsDuplicateBasePath(
+      '<a href="/careersignals/careersignals/dashboard">Dashboard</a>',
+      "/careersignals"
+    )).toBe(true);
+  });
+
+  it("does not mistake the CareerSignals icon filename for another path segment", () => {
+    expect(containsDuplicateBasePath(
+      '<link rel="icon" href="/careersignals/careersignals-icon.svg">',
+      "/careersignals"
+    )).toBe(false);
   });
 });
 
@@ -71,5 +91,29 @@ describe("requestWithRetry", () => {
     expect(response.status).toBe(500);
     expect(fetchImpl).toHaveBeenCalledOnce();
     expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it("forwards an explicit request method and headers", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 303 }));
+
+    await requestWithRetry("https://example.com/careersignals/auth/logout", {
+      fetchImpl,
+      requestInit: {
+        method: "POST",
+        headers: { origin: "https://example.com" }
+      }
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://example.com/careersignals/auth/logout",
+      expect.objectContaining({
+        method: "POST",
+        redirect: "manual",
+        headers: expect.objectContaining({
+          origin: "https://example.com",
+          "user-agent": "CareerSignals deployment smoke test"
+        })
+      })
+    );
   });
 });

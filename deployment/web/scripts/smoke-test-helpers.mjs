@@ -8,13 +8,20 @@ export function containsMixedContent(body) {
   return httpUrlAttribute.test(body) || httpCssUrl.test(body);
 }
 
+export function containsDuplicateBasePath(body, basePath) {
+  if (!basePath) return false;
+  const escaped = basePath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`${escaped}${escaped}(?=[/?#"'])`).test(body);
+}
+
 export async function requestWithRetry(url, options = {}) {
   const {
     fetchImpl = fetch,
     maxAttempts = DEFAULT_MAX_ATTEMPTS,
     retryDelayMs = DEFAULT_RETRY_DELAY_MS,
     sleep = delay,
-    onRetry = console.warn
+    onRetry = console.warn,
+    requestInit = {}
   } = options;
 
   if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
@@ -26,8 +33,12 @@ export async function requestWithRetry(url, options = {}) {
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const response = await fetchImpl(url, {
-      redirect: "manual",
-      headers: { "user-agent": "CareerSignals deployment smoke test" }
+      ...requestInit,
+      redirect: requestInit.redirect || "manual",
+      headers: {
+        "user-agent": "CareerSignals deployment smoke test",
+        ...requestInit.headers
+      }
     });
     if (response.status !== CLOUDFLARE_ORIGIN_TIMEOUT || attempt === maxAttempts) {
       return response;

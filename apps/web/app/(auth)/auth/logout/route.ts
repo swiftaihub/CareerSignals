@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { buildAppUrl } from "@/lib/app-path";
-import { clearAppCookie, clearLegacyRootCookie } from "@/lib/cookie-policy";
+import { buildAppUrl, getBasePath, getCookiePath } from "@/lib/app-path";
+import { appendExpiredCookie } from "@/lib/cookie-policy";
 import { DEMO_TOKEN_COOKIE_NAMES } from "@/lib/demo-cookie";
 import { clearAuthenticationSession } from "@/lib/logout";
 import { isRecoveryAuthCookieName, RECOVERY_INTENT_COOKIE_NAME } from "@/lib/password-recovery";
@@ -32,6 +32,23 @@ function isLogoutCookie(name: string, authCookieBaseName: string | null) {
     || new RegExp(`^${authCookieBaseName}(?:-code-verifier)?\\.\\d+$`).test(name);
 }
 
+function logoutCookiePaths(request: NextRequest) {
+  // Next/OpenNext may retain only the final Set-Cookie value for a name while
+  // adapting an App Route response. Append the mounted path last because that
+  // is where Demo and Supabase cookies are issued.
+  const paths = new Set(["/", getCookiePath()]);
+  const suffix = "/auth/logout";
+  if (request.nextUrl.pathname.endsWith(suffix)) {
+    const requestBasePath = request.nextUrl.pathname.slice(0, -suffix.length);
+    try {
+      paths.add(getBasePath(requestBasePath) || "/");
+    } catch {
+      // The configured and root paths remain safe fallbacks.
+    }
+  }
+  return paths;
+}
+
 export async function POST(request: NextRequest) {
   const origin = request.headers.get("origin");
   if (origin && origin !== request.nextUrl.origin) {
@@ -53,8 +70,10 @@ export async function POST(request: NextRequest) {
       cookieNames.add(name);
     }
   });
-  cookieNames.forEach((name) => clearAppCookie(response.cookies, name));
-  cookieNames.forEach((name) => clearLegacyRootCookie(response, name));
+  const cookiePaths = logoutCookiePaths(request);
+  cookieNames.forEach((name) => {
+    cookiePaths.forEach((path) => appendExpiredCookie(response, name, path));
+  });
   response.headers.set("Cache-Control", "private, no-store, max-age=0");
   return response;
 }

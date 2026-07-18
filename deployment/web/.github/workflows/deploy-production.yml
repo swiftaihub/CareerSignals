@@ -124,6 +124,7 @@ jobs:
           --keep-vars
           --name "$CLOUDFLARE_WORKER_NAME"
           --var "API_BASE_URL:$API_BASE_URL"
+          --var "NEXT_PUBLIC_BASE_PATH:$NEXT_PUBLIC_BASE_PATH"
 
       - name: Verify deployed routes
         run: node scripts/verify-routes.mjs wrangler.jsonc
