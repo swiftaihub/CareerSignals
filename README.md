@@ -1,140 +1,175 @@
 # CareerSignals
 
-CareerSignals is a hosted, multi-user job-search intelligence application. Supabase Auth and PostgreSQL form the SaaS control plane and serving layer, MotherDuck and dbt perform analytics, FastAPI enforces tenant and account policy, and Next.js serves the public, authenticated, Demo, and Admin experiences.
+<p align="center">
+  <strong>Find the roles worth your time.</strong><br />
+  Personal job-search intelligence that turns scattered postings into a ranked, explainable action queue.
+</p>
 
-The central safety rule is that shared job acquisition and personal matching are separate stages with separate ownership:
+<p align="center">
+  <a href="https://jobs.swiftaihub.com/careersignals">
+    <img alt="Open the live CareerSignals product" src="https://img.shields.io/badge/Live_Product-Open_CareerSignals-0f766e?style=for-the-badge" />
+  </a>
+  <a href="https://jobs.swiftaihub.com/careersignals">
+    <img alt="Try the read-only demo" src="https://img.shields.io/badge/Demo-Try_it_now-f59e0b?style=for-the-badge" />
+  </a>
+</p>
 
-```text
-User-requested personal refresh
-Authenticated active user
-  -> immutable config snapshot
-  -> queued PostgreSQL run
-  -> dedicated worker
-  -> global shared refresh from all active users' job configs
-     -> external Connectors
-     -> shared MotherDuck raw/staging
-     -> dbt selector: shared_refresh
-     -> shared PostgreSQL job_postings
-  -> dbt selector: user_refresh
-  -> atomic user-only publication
+<p align="center">
+  <a href="https://jobs.swiftaihub.com/careersignals">
+    <img alt="Professional using CareerSignals beside personalized job matches and analytics" src="apps/web/public/illustrations/hero-career-dashboard.webp" width="920" />
+  </a>
+</p>
+
+CareerSignals continuously organizes job postings into a shared job universe, then evaluates each role against a user's skills, goals, location, salary expectations, work preferences, and other signals. The result is a focused workspace for discovering strong matches, understanding every score, identifying skill gaps, and tracking applications.
+
+**[Explore the live product →](https://jobs.swiftaihub.com/careersignals)**
+
+## Why CareerSignals?
+
+- **One focused workspace** - bring relevant jobs, match signals, and application progress together.
+- **Explainable rankings** - see how skills, seniority, salary, industry, location, work model, and visa signals affect each score.
+- **Personal priorities** - update your preferences and let the ranking adapt to what matters now.
+- **Actionable insights** - review top matches, recurring skill gaps, company priorities, and search trends.
+- **Built-in application tracking** - move roles through Saved, Applied, Interview, Offer, Rejected, and Archived stages.
+- **Tenant-safe analytics** - every personal build and publication is scoped to one authenticated user and one immutable run.
+
+<p align="center">
+  <img alt="Scattered job postings becoming a small set of ranked opportunities" src="apps/web/public/illustrations/noise-to-signal.webp" width="900" />
+</p>
+
+## How it works
+
+1. **Tell CareerSignals what fits.** Add target roles, skills, locations, salary expectations, work arrangements, and other preferences.
+2. **CareerSignals refreshes the market.** System-owned connectors collect jobs and normalize them into one deduplicated shared dataset.
+3. **Every role is evaluated.** A user-scoped dbt build filters, categorizes, and scores the shared job universe using your personal signals.
+4. **You move the best roles forward.** Review the strongest matches first and track each opportunity from discovery to outcome.
+
+<p align="center">
+  <img alt="Candidate preferences moving through matching stages into scored job cards" src="apps/web/public/illustrations/personal-matching-flow.webp" width="900" />
+</p>
+
+## Product experience
+
+| Area | What it gives you |
+| --- | --- |
+| Dashboard | Search volume, match tiers, work arrangements, visa signals, and application funnel metrics |
+| Job Explorer | Filterable job discovery with match evidence and application status tracking |
+| Top Matches | The highest-confidence opportunities, ranked for the current user |
+| Skill Gap | Skills that recur across relevant jobs but are missing from the candidate profile |
+| Companies | Employers prioritized by matching role count and best available opportunity |
+| Settings | Guided preferences, skills, ranking weights, revisions, pipeline history, and export |
+
+The live site is served under `/careersignals`; for example, the dashboard route is `https://jobs.swiftaihub.com/careersignals/dashboard`.
+
+### Try the demo
+
+Open **[CareerSignals](https://jobs.swiftaihub.com/careersignals)** and choose **Explore live demo**.
+
+- Username: `demo`
+- Password: not required
+- Demo data: 20 curated jobs in a permanent, read-only tenant
+
+Demo users can explore the product without changing settings, running a pipeline, updating application status, or exporting the full dataset.
+
+## Architecture at a glance
+
+CareerSignals is a hosted, multi-user application built with Next.js, FastAPI, Supabase/PostgreSQL, MotherDuck, and dbt.
+
+```mermaid
+flowchart LR
+    Browser[Next.js web app] -->|same-origin BFF| API[FastAPI API]
+    API -->|auth, config, queue| PG[(Supabase / PostgreSQL)]
+    Scheduler[Scheduler] -->|enqueue shared refresh| PG
+    PG -->|claim queued run| Worker[Dedicated worker]
+    Worker --> Connectors[Job connectors]
+    Connectors --> MD[(MotherDuck)]
+    Worker -->|shared_refresh / user_refresh| DBT[dbt]
+    DBT --> MD
+    Worker -->|atomic publication| PG
+    API -->|user-scoped reads| PG
 ```
 
-Normal users cannot invoke Connectors directly, choose dbt selectors, submit a tenant UUID, or access another tenant's result partition. A personal refresh first runs the system-owned shared refresh, then filters, categorizes, and scores the shared job universe. The fixed Demo tenant has 20 curated jobs and is read-only.
+The central safety boundary is simple: **shared job acquisition and personal matching are separate stages with separate ownership**.
 
-## Repository map
+- The platform owns connector execution, shared refresh scheduling, and the `shared_refresh` selector.
+- The authenticated user owns only their preferences and personal result partition.
+- The API never accepts a browser-supplied tenant UUID or arbitrary dbt selector.
+- A failed personal build leaves the previously published result partition unchanged.
 
-```text
-apps/api/                         FastAPI application and authorization boundary
-apps/web/                         Next.js App Router frontend and authenticated BFF
-apps/worker/                      PostgreSQL queue worker for user dbt runs
-apps/scheduler/                   optional cron trigger for shared Connector refresh
-config/                           repository defaults and platform Connector config
-data/demo/demo_jobs.json          fixed 20-job Demo fixture
-dbt/                              shared_refresh and user_refresh models/selectors
-docs/                             deployment, operations, and migration guidance
-deployment/                       generated-repository deployment overlays
-packages/careersignal_core/       repositories, tasks, storage, and publication
-scripts/                          bootstrap, seed, migration, and refresh entrypoints
-supabase/migrations/              ordered control-plane and RLS migrations
-supabase/seed/                    deterministic Demo SQL seed
-tests/                            unit, pipeline-isolation, and RLS integration tests
+## dbt model data pipeline
+
+The graph below mirrors the current `ref()` and `source()` dependencies. Solid paths are primary serving models; dashed paths are compatibility models retained for downstream consumers.
+
+```mermaid
+flowchart LR
+    subgraph Shared["shared_refresh · platform-owned"]
+        SJ[(staging.shared_jobs_processed)] --> S1[stg_job_posts]
+        S1 --> S2[int_job_posts_deduped]
+        S2 --> S3[mart_shared_canonical_jobs]
+        S2 --> S4[mart_shared_source_freshness]
+    end
+
+    subgraph User["user_refresh · one user/run partition"]
+        P0[(app.user_job_preferences)] --> P1[stg_user_job_preferences]
+        A0[(app.user_skill_aliases)] --> A1[stg_user_skill_aliases]
+        C0[(app.user_candidate_skills)] --> C1[stg_user_candidate_skills]
+        T0[(app.job_application_status)] --> T1[stg_application_status]
+
+        S2 --> U1[int_user_job_candidates]
+        P1 --> U1
+        U1 --> U2[int_user_job_skills_exploded]
+        A1 --> U2
+        C1 --> U2
+
+        U1 --> U3[int_user_jobs_scored]
+        U2 --> U3
+        T1 --> U4[int_latest_job_status]
+        U3 --> M1[mart_jobs_scored]
+        U4 --> M1
+
+        M1 --> M2[mart_top_matches]
+        M1 --> M3[mart_category_summary]
+        M1 --> M4[mart_company_priority_list]
+        M1 --> M5[mart_skill_gap_analysis]
+        U2 --> M5
+
+        C1 -. compatibility .-> CX[stg_candidate_skills]
+        U2 -. compatibility .-> UX[int_job_skills_exploded]
+    end
 ```
 
-## Requirements
-
-- Python 3.11 or 3.12
-- Node.js 22 or newer and npm (required by the pinned Cloudflare toolchain)
-- Supabase CLI and either a local Supabase stack or a linked Supabase project
-- A MotherDuck database and token for shared/user dbt execution
-- dbt dependencies installed from `requirements.txt` and `dbt/packages.yml`
-
-Do not use a plain PostgreSQL database as a drop-in replacement for Supabase migrations: the schema references `auth.users`, `auth.uid()`, and Supabase database roles.
-
-## Environment setup
-
-Copy the examples and fill the local files with development credentials:
-
-```powershell
-Copy-Item .env.example .env
-Copy-Item apps/api/.env.example apps/api/.env
-Copy-Item apps/web/.env.example apps/web/.env.local
-```
-
-The backend environment requires at least:
-
-```dotenv
-CAREERSIGNAL_SAAS_MODE=true
-CAREERSIGNAL_ENVIRONMENT=development
-CAREERSIGNAL_DATA_MODE=postgres
-DATABASE_URL=postgresql://...
-SUPABASE_URL=https://...
-SUPABASE_ANON_KEY=...
-SUPABASE_SERVICE_ROLE_KEY=...
-SUPABASE_JWT_AUDIENCE=authenticated
-DEMO_USER_UUID=00000000-0000-4000-8000-000000000020
-DEMO_SESSION_SECRET=<long-random-secret>
-MOTHERDUCK_TOKEN=...
-MOTHERDUCK_DATABASE=CareerSignal
-```
-
-The frontend environment is deliberately small:
-
-```dotenv
-# Server-only; it is never sent to browser JavaScript.
-API_BASE_URL=http://localhost:8000
-PASSWORD_RECOVERY_COOKIE_SECRET=
-
-# Supabase project metadata and canonical routing safe for the browser.
-NEXT_PUBLIC_SITE_ORIGIN=http://localhost:3000
-NEXT_PUBLIC_BASE_PATH=
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_REPLACE_WITH_BROWSER_KEY
-```
-
-Leave `NEXT_PUBLIC_BASE_PATH` empty for ordinary root-path development, or set it to `/careersignals` for a production-equivalent local build. Generate a unique `PASSWORD_RECOVERY_COOKIE_SECRET` of at least 32 bytes for each environment. Password recovery also requires the matching callback URL to be allowed in Supabase; see [Supabase password management configuration](docs/supabase-password-management.md).
-
-Never add `NEXT_PUBLIC_` to `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`, `MOTHERDUCK_TOKEN`, `DEMO_SESSION_SECRET`, Connector credentials, or any other secret. The browser calls the same-origin Next.js BFF, which attaches the verified server-side session when forwarding allowlisted application requests to FastAPI.
-
-## Supabase and migrations
-
-For an explicitly disposable local environment:
+The selectors are intentionally fixed:
 
 ```bash
-supabase start
-supabase db reset
+# Candidate-independent shared models
+cd dbt
+dbt build --selector shared_refresh --profiles-dir .
+
+# One trusted user/run partition
+dbt build --selector user_refresh --profiles-dir . \
+  --vars '{"user_uuid":"USER_UUID","run_uuid":"RUN_UUID","connector_run_uuid":"CONNECTOR_RUN_UUID"}'
 ```
 
-For a hosted development/staging project:
+Every user model calls `require_user_context()`. Never run a personal refresh with `--full-refresh`, accept a selector from an HTTP request, or delete an unqualified multi-user table.
+
+## Quick start
+
+### Prerequisites
+
+| Tool | Version / purpose |
+| --- | --- |
+| Python | 3.11 or 3.12 |
+| Node.js | 22 or newer, required by the pinned Cloudflare toolchain |
+| Supabase CLI | Local Supabase stack or a linked hosted project |
+| MotherDuck | Database and token for shared and personal dbt execution |
+
+Supabase is required because the migrations use `auth.users`, `auth.uid()`, and Supabase database roles. A plain PostgreSQL database is not a drop-in replacement.
+
+### 1. Clone and install
 
 ```bash
-supabase link --project-ref "$SUPABASE_PROJECT_REF"
-supabase db push --dry-run
-supabase db push
-```
-
-The eighteen files in `supabase/migrations/` must remain in numeric order. Validate them in a disposable project before applying them to a shared environment. Supabase CLI state under `supabase/.temp/` is intentionally ignored; reconstruct a link with `supabase link` rather than committing project metadata.
-
-Bootstrap the first Admin only after migrations have been applied:
-
-```bash
-python scripts/bootstrap_admin.py
-```
-
-`ADMIN_BOOTSTRAP_PASSWORD` is read from the environment and is never printed. The command is idempotent.
-
-Seed the permanent Demo tenant and its exactly 20 current matches:
-
-```bash
-python -m scripts.seed_demo
-```
-
-Set `DEMO_USER_UUID=00000000-0000-4000-8000-000000000020`. Demo login uses a short-lived FastAPI-signed token, not an `auth.users` password. The deterministic SQL equivalent is `supabase/seed/0001_demo.sql`.
-
-See [database migrations and rollback](docs/database/migrations.md) before changing a shared database.
-
-## Install
-
-```bash
+git clone https://github.com/swiftaihub/CareerSignals.git
+cd CareerSignals
 python -m venv .venv
 ```
 
@@ -152,35 +187,108 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-Frontend dependencies:
+Install the frontend and dbt dependencies:
 
 ```bash
 cd apps/web
 npm install
-cd ../..
-```
-
-dbt packages and compile:
-
-```bash
-cd dbt
+cd ../../dbt
 dbt deps
 dbt compile --profiles-dir .
 cd ..
 ```
 
-## Run locally
+### 2. Configure the environment
 
-Use four processes from the repository root:
+```powershell
+Copy-Item .env.example .env
+Copy-Item apps/api/.env.example apps/api/.env
+Copy-Item apps/web/.env.example apps/web/.env.local
+```
+
+Minimum backend configuration:
+
+```dotenv
+CAREERSIGNAL_SAAS_MODE=true
+CAREERSIGNAL_ENVIRONMENT=development
+CAREERSIGNAL_DATA_MODE=postgres
+DATABASE_URL=postgresql://...
+SUPABASE_URL=https://...
+SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+SUPABASE_JWT_AUDIENCE=authenticated
+DEMO_USER_UUID=00000000-0000-4000-8000-000000000020
+DEMO_SESSION_SECRET=<long-random-secret>
+MOTHERDUCK_TOKEN=...
+MOTHERDUCK_DATABASE=CareerSignal
+```
+
+Minimum frontend configuration:
+
+```dotenv
+# Server-only
+API_BASE_URL=http://localhost:8000
+PASSWORD_RECOVERY_COOKIE_SECRET=<at-least-32-random-bytes>
+
+# Safe for browser use
+NEXT_PUBLIC_SITE_ORIGIN=http://localhost:3000
+NEXT_PUBLIC_BASE_PATH=
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_REPLACE_WITH_BROWSER_KEY
+```
+
+Leave `NEXT_PUBLIC_BASE_PATH` empty for normal local development. Set it to `/careersignals` for a production-equivalent local build.
+
+> [!CAUTION]
+> Never expose `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`, `MOTHERDUCK_TOKEN`, `DEMO_SESSION_SECRET`, connector credentials, or any other secret through a `NEXT_PUBLIC_` variable.
+
+Password recovery also requires the matching callback URL in Supabase. See [Supabase password management](docs/supabase-password-management.md).
+
+### 3. Prepare Supabase
+
+For an explicitly disposable local environment:
 
 ```bash
+supabase start
+supabase db reset
+```
+
+For hosted development or staging:
+
+```bash
+supabase link --project-ref "$SUPABASE_PROJECT_REF"
+supabase db push --dry-run
+supabase db push
+```
+
+Bootstrap the first Admin and seed the read-only Demo tenant after migrations are applied:
+
+```bash
+python scripts/bootstrap_admin.py
+python -m scripts.seed_demo
+```
+
+`ADMIN_BOOTSTRAP_PASSWORD` is read from the environment and never printed. Both commands are designed for repeatable setup. Read [database migrations and rollback](docs/database/migrations.md) before changing a shared database.
+
+### 4. Run locally
+
+Start these four processes from the repository root:
+
+```bash
+# Terminal 1 - API
 uvicorn apps.api.main:app --reload --host 0.0.0.0 --port 8000
+
+# Terminal 2 - queue worker
 python -m apps.worker.main
+
+# Terminal 3 - shared-refresh scheduler
 python -m apps.scheduler.main
+
+# Terminal 4 - frontend
 cd apps/web && npm run dev
 ```
 
-The web application is available at `http://localhost:3000` with an empty base path, or at `http://localhost:3000/careersignals` when `NEXT_PUBLIC_BASE_PATH=/careersignals`. The API health endpoint is `http://localhost:8000/api/health`.
+Open `http://localhost:3000`. The API health endpoint is `http://localhost:8000/api/health`.
 
 Alternatively, after preparing `.env` and `apps/web/.env.local`:
 
@@ -188,77 +296,13 @@ Alternatively, after preparing `.env` and `apps/web/.env.local`:
 docker compose up
 ```
 
-The Compose stack runs API, worker, scheduler, and web processes. It does not run a fake local MotherDuck server; configure the real MotherDuck service. Supabase remains a local CLI stack or hosted project outside this Compose file.
-
-## Application routes
-
-Routes below are logical application paths. Production serves every one below `/careersignals`; for example, `/dashboard` becomes `https://jobs.swiftaihub.com/careersignals/dashboard`.
-
-Public routes:
-
-- `/` — Home, login/register calls to action, and one-click Demo entry
-- `/pricing` — current manual-entitlement pricing placeholder
-- `/login` and `/register` — server-action authentication flows
-- `/pending` and `/account-expired` — restricted account-state experiences
-
-Authenticated routes:
-
-- `/dashboard`, `/jobs`, `/top-matches`, `/skill-gap`, `/companies`
-- `/settings` — account metadata, sanitized source freshness, structured config overrides, revision history, personal run queue/history, and user-scoped export
-- `/admin`, `/admin/users`, `/admin/audit` — server-gated Admin experiences
-
-The protected and Admin layouts load `/api/me` server-side. Pending, expired, suspended, and deleted accounts do not render analytical pages. Hiding Admin navigation is only a convenience; FastAPI independently enforces `require_admin` on every Admin API.
-
-Demo instructions are `Username: demo`, `Password: not required`. Demo sessions may read the fixed partition but cannot change statuses/configuration, run a Pipeline, or export the full dataset.
-
-## API surface
-
-Authentication and account:
-
-- `POST /api/auth/login`
-- `POST /api/auth/register`
-- `POST /api/auth/demo-session`
-- `GET /api/me`
-
-User-scoped application data:
-
-- `GET /api/jobs`, `/api/jobs/filter-options`, `/api/jobs/facets`, `/api/jobs/{job_id}`
-- `PATCH /api/jobs/{job_id}/status`
-- `GET /api/dashboard/summary`, `/api/top-matches`, `/api/category-summary`
-- `GET /api/skill-gap`, `/api/company-priority`
-- `POST /api/exports/excel`
-
-Configuration and processing:
-
-- `GET /api/configs`, `GET|PUT /api/configs/{config_type}`
-- config reset, reset-field, versions, and restore endpoints
-- `GET|POST /api/pipeline-runs` plus owned run detail/cancel
-- `GET /api/data-freshness` (sanitized and read-only)
-
-Admin:
-
-- `GET /api/admin/metrics`
-- paginated `/api/admin/users` lifecycle endpoints
-- `GET /api/admin/audit-logs`
-- `POST /api/admin/connector-runs` to enqueue an Admin-only global refresh
-
-The former user-facing `/api/pipeline/run`, `/api/dbt/run`, and `/api/dbt/test` operations are deprecated and return `410 Gone`. There is no public Connector refresh endpoint.
-
-## Configuration semantics
-
-`config/candidate_profile.yml`, `config/jobs_config.yml`, and `config/skill_taxonomy.yml` are version-controlled defaults. Each user stores only validated JSON overrides in PostgreSQL:
-
-```text
-repository default + user override = effective user configuration
-```
-
-Each successful save creates an immutable revision. Restoring an older revision creates another revision; history is not rewritten. `config/platform_connector_config.yml` remains system-owned for Connector sources, budgets, retry, freshness, and optional cron settings. Shared acquisition search categories and broad location filters are built from every active non-Demo user's effective `jobs_config`.
-
-Changing Job Preferences does not query external job APIs in the request/response path. Updated acquisition fields are included in the next scheduled, Admin-triggered, or first-user bootstrap global refresh. The personal worker snapshots the effective configuration and then runs only the fixed `user_refresh` dbt selector for that user/run partition against a successful shared-data version.
+The Compose stack runs the API, worker, scheduler, and web processes. Configure a real MotherDuck service and a Supabase local stack or hosted project separately.
 
 ## Pipeline operations
 
-The global pipeline is system-owned. It aggregates every eligible active production user's effective `jobs_config`, normalizes and deduplicates connector requests, runs external connectors, refreshes shared dbt models with `shared_refresh`, and publishes shared job data only after the full shared build succeeds. It is scheduled by the runtime environment:
+### Shared refresh
+
+The global pipeline aggregates acquisition preferences from every eligible active production user, normalizes connector requests, refreshes shared dbt models, and publishes shared job data only after the full build succeeds.
 
 ```env
 CONNECTOR_REFRESH_CRON=0 7,16,21 * * *
@@ -266,36 +310,95 @@ CONNECTOR_REFRESH_TIMEZONE=America/New_York
 CONNECTOR_REFRESH_TRIGGER_MODE=scheduled
 ```
 
-The scheduler enqueues metadata only; the worker claims global runs and uses the same lock/publication path for scheduled, Admin, CLI, and first-user bootstrap refreshes. Normal users do not receive a global refresh endpoint.
+The scheduler only enqueues metadata. The worker claims global runs and uses the same lock and publication path for scheduled, Admin, CLI, and first-user bootstrap refreshes.
 
-The personal pipeline is user-owned. It never imports connector clients, never runs `shared_refresh`, never accepts a browser-supplied `user_uuid`, and never accepts a browser-supplied dbt selector. After a user's bootstrap is complete, `POST /api/pipeline-runs` snapshots that authenticated user's config, binds the run to the latest successfully published shared connector run, and queues only `user_refresh`.
-
-First-user bootstrap is server-orchestrated. The first personal request creates a durable bootstrap workflow, snapshots the user's current config, queues a `first_user_bootstrap` global refresh that includes that frozen acquisition config, waits for successful shared publication, binds the waiting personal run to that exact `connector_run_uuid`, and then runs the personal dbt-only refresh. Duplicate first clicks return the existing workflow instead of creating another global run.
-
-Enqueue a trusted production-equivalent shared refresh manually. This creates a `manual_cli` run and requires the worker to be running; the worker performs connector acquisition, MotherDuck/dbt work, and PostgreSQL publication:
+To enqueue a trusted shared refresh manually:
 
 ```bash
 python scripts/refresh_connectors.py
-# Equivalent explicit form:
+# Equivalent explicit form
 python scripts/refresh_connectors.py --enqueue
 python -m apps.worker.main
 ```
 
-Run the fixed shared dbt selector directly against already staged shared data:
+### Personal refresh
 
-```bash
-cd dbt
-dbt build --selector shared_refresh --profiles-dir .
+`POST /api/pipeline-runs` snapshots the authenticated user's effective configuration, binds the run to the latest successfully published shared connector run, and queues only `user_refresh`.
+
+For the first user, the server creates a durable bootstrap workflow: it freezes the user's acquisition configuration, queues a `first_user_bootstrap` shared refresh, waits for publication, binds the waiting personal run to that exact connector run, and then starts personal matching. Duplicate first clicks return the existing workflow.
+
+## Configuration model
+
+| File | Ownership | Purpose |
+| --- | --- | --- |
+| `config/candidate_profile.yml` | Repository default + user override | Candidate profile defaults |
+| `config/jobs_config.yml` | Repository default + user override | Search and ranking preferences |
+| `config/skill_taxonomy.yml` | Repository default + user override | Skill aliases and matching vocabulary |
+| `config/platform_connector_config.yml` | System only | Sources, budgets, retries, freshness, and schedules |
+
+```text
+repository default + validated user override = effective user configuration
 ```
 
-Development-only user selector example (use real UUID values and an existing staged snapshot):
+Every successful save creates an immutable revision. Restoring an older version creates a new revision instead of rewriting history. Saving preferences never calls external job APIs in the request/response path; updated acquisition fields are used by the next global refresh.
 
-```bash
-dbt build --selector user_refresh --profiles-dir . \
-  --vars '{"user_uuid":"00000000-0000-4000-8000-000000000001","run_uuid":"00000000-0000-4000-8000-000000000002","connector_run_uuid":"00000000-0000-4000-8000-000000000003"}'
+## Repository map
+
+```text
+apps/api/                         FastAPI application and authorization boundary
+apps/web/                         Next.js App Router frontend and authenticated BFF
+apps/worker/                      PostgreSQL queue worker for dbt runs
+apps/scheduler/                   Optional cron trigger for shared refreshes
+config/                           User defaults and platform connector configuration
+data/demo/demo_jobs.json          Fixed 20-job Demo fixture
+dbt/                              Shared and user models, tests, macros, and selectors
+docs/                             Deployment, operations, and migration guidance
+deployment/                       Deployment overlays
+packages/careersignal_core/       Repositories, tasks, storage, and publication
+scripts/                          Bootstrap, seed, migration, and refresh entrypoints
+supabase/migrations/              Ordered control-plane and RLS migrations
+supabase/seed/                    Deterministic Demo SQL seed
+tests/                            Unit, isolation, and RLS integration tests
 ```
 
-Never pass an arbitrary selector from a request, run a user refresh with `--full-refresh`, or delete an unqualified multi-user table. A failed user build/publication leaves the previous current result partition unchanged.
+## API at a glance
+
+<details>
+<summary><strong>Authentication and account</strong></summary>
+
+- `POST /api/auth/login`
+- `POST /api/auth/register`
+- `POST /api/auth/demo-session`
+- `GET /api/me`
+
+</details>
+
+<details>
+<summary><strong>User-scoped data and analytics</strong></summary>
+
+- `GET /api/jobs`, `/api/jobs/filter-options`, `/api/jobs/facets`, `/api/jobs/{job_id}`
+- `PATCH /api/jobs/{job_id}/status`
+- `GET /api/dashboard/summary`, `/api/top-matches`, `/api/category-summary`
+- `GET /api/skill-gap`, `/api/company-priority`
+- `POST /api/exports/excel`
+
+</details>
+
+<details>
+<summary><strong>Configuration, processing, and Admin</strong></summary>
+
+- `GET /api/configs`, `GET|PUT /api/configs/{config_type}`
+- Config reset, reset-field, versions, and restore endpoints
+- `GET|POST /api/pipeline-runs` plus owned run detail and cancellation
+- `GET /api/data-freshness`
+- `GET /api/admin/metrics`
+- Paginated `/api/admin/users` lifecycle endpoints
+- `GET /api/admin/audit-logs`
+- `POST /api/admin/connector-runs`
+
+</details>
+
+The former `/api/pipeline/run`, `/api/dbt/run`, and `/api/dbt/test` operations are deprecated and return `410 Gone`. There is no public connector refresh endpoint.
 
 ## Verification
 
@@ -325,22 +428,40 @@ dbt deps
 dbt compile --profiles-dir .
 dbt build --selector shared_refresh --profiles-dir .
 dbt build --selector user_refresh --profiles-dir . \
-  --vars '{"user_uuid":"TEST_UUID","run_uuid":"TEST_RUN_UUID"}'
+  --vars '{"user_uuid":"TEST_UUID","run_uuid":"TEST_RUN_UUID","connector_run_uuid":"TEST_CONNECTOR_RUN_UUID"}'
 ```
 
-
-docker:
+Docker services:
 
 ```bash
 docker compose up -d --force-recreate api worker scheduler
 ```
 
-RLS and two-user tests require real Supabase test credentials from the non-committed `.env`. Skipped integration tests are not equivalent to a pass; inspect the Pytest skip report.
+RLS and two-user tests require real Supabase test credentials from the non-committed `.env`. A skipped integration test is not equivalent to a pass; inspect the Pytest skip report.
 
-## Production
+## Production and operations
 
-The generated web repository deploys SSR Next.js to Cloudflare Workers through OpenNext. The generated backend repository deploys one immutable ARM64 image as separate API, worker, and single-scheduler services on Oracle A1 behind Caddy. Keep `USER_PIPELINE_MAX_CONCURRENCY=1` until MotherDuck writer concurrency has been validated, set exact production CORS origins, and store runtime secrets outside Git.
+The web application deploys SSR Next.js to Cloudflare Workers through OpenNext. The backend deploys one immutable ARM64 image as separate API, worker, and single-scheduler services on Oracle A1 behind Caddy.
 
-Start with the [production deployment overview](docs/production-deployment.md). The [repository split](docs/repository-splitting.md), [Cloudflare deployment](docs/cloudflare-deployment.md), [Oracle deployment](docs/oracle-deployment.md), [runbook](docs/production-runbook.md), and [rollback guide](docs/rollback.md) contain the release and recovery procedures. The legacy consolidated operational notes remain in [deployment.md](docs/deployment.md).
+Start here:
 
-Billing is currently a manual entitlement placeholder. `estimated_mrr_cents` is a projection for active non-Demo users; only successful billing events count as actual revenue. A future Stripe integration should use verified, idempotent webhooks to append billing and entitlement events rather than mutating remaining-day counters.
+- [Production deployment overview](docs/production-deployment.md)
+- [Repository splitting](docs/repository-splitting.md)
+- [Cloudflare deployment](docs/cloudflare-deployment.md)
+- [Oracle deployment](docs/oracle-deployment.md)
+- [Production runbook](docs/production-runbook.md)
+- [Rollback guide](docs/rollback.md)
+- [Legacy consolidated deployment notes](docs/deployment.md)
+
+Keep `USER_PIPELINE_MAX_CONCURRENCY=1` until MotherDuck writer concurrency has been validated, set exact production CORS origins, and store runtime secrets outside Git.
+
+Billing is currently a manual entitlement placeholder. `estimated_mrr_cents` is a projection for active non-Demo users; only successful billing events count as actual revenue.
+
+<p align="center">
+  <img alt="CareerSignals user receiving a successful outcome" src="apps/web/public/illustrations/offer-success.webp" width="560" />
+</p>
+
+<p align="center">
+  <strong>Ready to turn job-search noise into a clear next action?</strong><br />
+  <a href="https://jobs.swiftaihub.com/careersignals">Open CareerSignals →</a>
+</p>
