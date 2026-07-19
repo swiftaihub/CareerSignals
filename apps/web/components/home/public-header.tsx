@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowRight, LayoutDashboard, LogIn, Play } from "lucide-react";
 
 import { demoAction } from "@/app/(auth)/actions";
+import { withBasePath } from "@/lib/app-path";
 
 import { HOME_ROUTES } from "./home-content";
 
@@ -9,13 +10,13 @@ export function PublicHeader({ authenticated = false }: { authenticated?: boolea
   return (
     <header className="public-header">
       <div className="mx-auto flex h-16 max-w-[90rem] items-center justify-between gap-3 px-4 sm:px-6 lg:px-10">
-        <Link className="group flex min-w-0 items-center gap-2.5 font-bold text-slate-950" href="/" aria-label="CareerSignals home">
+        <a className="group flex min-w-0 items-center gap-2.5 font-bold text-slate-950" href={withBasePath(HOME_ROUTES.home)} aria-label="CareerSignals home">
           <span className="brand-mark" aria-hidden="true"><span>CS</span></span>
           <span className="hidden text-[0.95rem] tracking-[-0.02em] min-[380px]:inline">CareerSignals</span>
-        </Link>
+        </a>
 
         <nav aria-label="Public navigation" className="flex min-w-0 items-center gap-1.5 sm:gap-2">
-          <Link className="btn btn-ghost hidden md:inline-flex" href="#how-it-works">How it works</Link>
+          <a className="btn btn-ghost hidden md:inline-flex" href={withBasePath(HOME_ROUTES.howItWorks)}>How it works</a>
           <Link className="btn btn-ghost hidden sm:inline-flex" href={HOME_ROUTES.pricing}>Pricing</Link>
           {authenticated ? (
             <Link className="btn btn-primary header-primary" href={HOME_ROUTES.dashboard}>

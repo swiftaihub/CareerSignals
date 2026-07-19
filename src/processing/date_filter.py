@@ -15,6 +15,7 @@ RELATIVE_RE = re.compile(
     re.IGNORECASE,
 )
 DATE_ONLY_FORMATS = ("%Y-%m-%d", "%m/%d/%Y", "%b %d, %Y", "%B %d, %Y")
+MAX_FUTURE_SKEW = timedelta(hours=24)
 
 
 @dataclass(frozen=True)
@@ -109,6 +110,9 @@ def freshness_decision(
             return FreshnessDecision(True, "unknown_date_included")
         return FreshnessDecision(False, "unknown_date_excluded")
 
+    if parsed.posted_at > current + MAX_FUTURE_SKEW:
+        return FreshnessDecision(False, "future_date", parsed.posted_at)
+
     cutoff = current - timedelta(hours=freshness_filter.max_post_age_hours)
     if parsed.date_only:
         posted_date: date = parsed.posted_at.date()
@@ -134,6 +138,7 @@ def filter_jobs_by_posted_date(
         "older_than_max_age": 0,
         "unknown_date_excluded": 0,
         "unknown_date_included": 0,
+        "future_date": 0,
         "disabled": 0,
     }
     kept: list[dict[str, Any]] = []

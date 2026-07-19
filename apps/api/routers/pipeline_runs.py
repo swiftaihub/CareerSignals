@@ -51,7 +51,11 @@ def submit_pipeline_run(
     current_user = _pipeline_user(current_user)
     snapshot = configs.snapshot(current_user.user_uuid)
     try:
-        if not bootstrap.is_completed(current_user.user_uuid):
+        bootstrap_enabled = settings.connector_refresh_trigger_mode in {
+            "first_user_bootstrap",
+            "both",
+        }
+        if bootstrap_enabled and not bootstrap.is_completed(current_user.user_uuid):
             created = bootstrap.start_or_get(
                 user_uuid=current_user.user_uuid,
                 snapshot=snapshot,

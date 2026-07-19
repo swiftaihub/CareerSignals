@@ -7,13 +7,34 @@ expected_source_sha="$(basename "$release_dir")"
   || { echo "Release directory must end in a full lowercase source SHA." >&2; exit 1; }
 compose=(docker compose --env-file "$release_dir/release.env" -f "$release_dir/docker-compose.production.yml")
 
+report_service_failure() {
+  local service="$1"
+  local reason="$2"
+  local marker="/tmp/careersignals-health-${expected_source_sha}-${service}.logged"
+
+  echo "$service $reason" >&2
+  # A service may legitimately report "starting" before it has emitted useful
+  # output. Preserve the one-time diagnostic for a terminal health/state failure.
+  if [[ "$reason" != "health is starting" && ! -e "$marker" ]]; then
+    umask 077
+    : >"$marker"
+    echo "Last $service logs (credentials redacted):" >&2
+    "${compose[@]}" logs --no-color --tail 80 "$service" 2>&1 \
+      | sed -E \
+          -e 's/((motherduck_)?token|password|secret|api[_-]?key)=([^[:space:]&]+)/\1=[REDACTED]/Ig' \
+          -e 's/(authorization:[[:space:]]*bearer[[:space:]]+)[^[:space:]]+/\1[REDACTED]/Ig' \
+      >&2 || true
+  fi
+  return 1
+}
+
 for service in api worker scheduler reverse-proxy; do
   container_id="$(${compose[@]} ps -q "$service")"
-  [[ -n "$container_id" ]] || { echo "$service is not running" >&2; exit 1; }
+  [[ -n "$container_id" ]] || { report_service_failure "$service" "is not running"; exit 1; }
   state="$(docker inspect --format '{{.State.Status}}' "$container_id")"
-  [[ "$state" == "running" ]] || { echo "$service state is $state" >&2; exit 1; }
+  [[ "$state" == "running" ]] || { report_service_failure "$service" "state is $state"; exit 1; }
   health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container_id")"
-  [[ "$health" == "healthy" ]] || { echo "$service health is $health" >&2; exit 1; }
+  [[ "$health" == "healthy" ]] || { report_service_failure "$service" "health is $health"; exit 1; }
 done
 
 scheduler_count="$(docker ps --filter 'label=com.docker.compose.project=careersignals' --filter 'label=com.docker.compose.service=scheduler' --format '{{.ID}}' | wc -l | tr -d ' ')"

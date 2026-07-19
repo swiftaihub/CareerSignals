@@ -179,6 +179,24 @@ class ConnectorRunRepository:
             [public_status_message, str(connector_run_uuid)],
         )
 
+    def fail_stale_running(self, *, max_age_seconds: int) -> int:
+        """Close orphaned runs after a worker restart releases their session locks."""
+
+        return self.store.execute(
+            """
+            update public.connector_refresh_runs
+            set status = 'failed',
+                completed_at = now(),
+                shared_dbt_run_completed = false,
+                public_status_message = 'The shared-data refresh exceeded its execution window and was stopped.',
+                error_code = 'CONNECTOR_REFRESH_STALE',
+                internal_error_message = 'Connector refresh exceeded the configured execution window.'
+            where status = 'running'
+              and started_at < now() - (%s * interval '1 second')
+            """,
+            [max_age_seconds],
+        )
+
     def finish(
         self,
         *,

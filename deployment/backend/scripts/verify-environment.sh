@@ -71,6 +71,7 @@ require_exact "$api_env" DEMO_USER_UUID 00000000-0000-4000-8000-000000000020
 require_value "$api_env" DEMO_SESSION_SECRET
 require_exact "$api_env" CORS_ORIGINS https://jobs.swiftaihub.com
 require_exact "$api_env" LOG_LEVEL INFO
+require_exact "$api_env" USER_PIPELINE_DAILY_LIMIT 4
 demo_secret=""
 read_env_value "$api_env" DEMO_SESSION_SECRET demo_secret
 [[ ${#demo_secret} -ge 32 ]] || fail "DEMO_SESSION_SECRET must contain at least 32 characters"
@@ -89,6 +90,7 @@ require_exact "$worker_env" DBT_TARGET prod
 require_exact "$worker_env" CAREERSIGNAL_RUN_DBT true
 require_exact "$worker_env" CAREERSIGNAL_WRITE_DEBUG_JSON false
 require_exact "$worker_env" USER_PIPELINE_MAX_CONCURRENCY 1
+forbid_key "$worker_env" USER_PIPELINE_DAILY_LIMIT
 require_value "$worker_env" JOB_SOURCES
 job_sources=""
 read_env_value "$worker_env" JOB_SOURCES job_sources

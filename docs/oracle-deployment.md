@@ -150,9 +150,13 @@ The production files have different responsibilities:
 - `api.env`: PostgreSQL, Supabase URL/service/JWT configuration, Demo signing, CORS, API quotas/freshness, logging.
 - `worker.env`: PostgreSQL, MotherDuck, dbt `prod`, approved Connector sources/credentials, queue polling and writer concurrency.
 - `scheduler.env`: PostgreSQL, cron, timezone, trigger mode, logging. No Supabase, MotherDuck, dbt, Demo, or Connector credentials.
+
+The per-user daily submission quota is API-owned. Production requires `USER_PIPELINE_DAILY_LIMIT=4` in `api.env`; do not place it in `worker.env`, where it cannot protect the enqueue endpoint.
+
+The identity represented by `MOTHERDUCK_TOKEN` must own or have shared access to the exact database named by `MOTHERDUCK_DATABASE` (production uses `CareerSignal`). A syntactically valid token is insufficient if that database is unavailable to its identity; the Worker readiness gate intentionally rejects that release instead of accepting a process that cannot execute global or personal refreshes.
 - `migration.env`: direct production database URI and project reference. No application runtime secrets beyond what migration requires.
 
-The Dockerfile supplies `/app/dbt` for both dbt directories. Compose supplies separate heartbeat paths in an in-memory `/run/careersignals` filesystem and fixes initial Worker concurrency to one. Do not add host storage for local outputs, spreadsheets, or a DuckDB database; production analytics uses MotherDuck and the serving layer is PostgreSQL.
+The Dockerfile supplies `/app/dbt` for both dbt directories. Compose supplies separate heartbeat paths in an in-memory `/run/careersignals` filesystem, fixes the MotherDuck writer concurrency to one, fetches up to five independent connector sources in parallel, and uses a 30-minute orphan-recovery window for global refresh records. Do not add host storage for local outputs, spreadsheets, or a DuckDB database; production analytics uses MotherDuck and the serving layer is PostgreSQL.
 
 Validate a staged or current release without displaying values:
 
@@ -255,12 +259,14 @@ The Compose template runs application services as image user/group `10001`, with
 - read-only root filesystems;
 - all Linux capabilities dropped;
 - `no-new-privileges`;
-- writable size-limited `tmpfs` paths only for `/tmp`, heartbeats, DuckDB client state, and dbt logs/target;
+- writable size-limited `tmpfs` paths only for `/tmp`, heartbeats, DuckDB client state, and dbt logs/target; all remain `noexec` except the narrow `.duckdb` mount, which is `exec,nosuid,nodev` because DuckDB must map the native MotherDuck extension stored there;
 - an init process and 45-second stop grace period;
 - `restart: unless-stopped`;
 - a private bridge network and no Worker/Scheduler ports.
 
 The reverse proxy is also read-only, drops all capabilities except `NET_BIND_SERVICE`, and mounts TLS material read-only. Review every new volume or capability as a security boundary change.
+
+The Worker performs a read-only MotherDuck readiness query before starting its heartbeat. A missing token, blocked extension load, or unavailable analytics database therefore keeps the Worker unhealthy and prevents a release from being marked healthy.
 
 ## Health and release verification
 

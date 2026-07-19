@@ -59,6 +59,14 @@ class ConnectorRefreshWorker:
             item for item in snapshots if str(item.get("user_uuid")) != user_uuid
         ] + [frozen_snapshot]
 
+    def recover_stale_runs(self) -> int:
+        recovered = self.repository.fail_stale_running(
+            max_age_seconds=self.settings.connector_refresh_max_seconds,
+        )
+        if recovered:
+            LOGGER.warning("Marked %s orphaned connector refresh run(s) as failed", recovered)
+        return recovered
+
     def process_one(self) -> bool:
         run = self.repository.claim_next()
         if run is None:
@@ -191,6 +199,7 @@ class ConnectorRefreshWorker:
 
     def run_forever(self, stop_event: threading.Event | None = None) -> None:
         stop = stop_event or threading.Event()
+        self.recover_stale_runs()
         LOGGER.info("Global connector refresh worker started")
         while not stop.is_set():
             processed = self.process_one()

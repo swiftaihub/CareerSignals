@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+from datetime import date, datetime, time, timezone
 from typing import Any, Iterable, Mapping
 from uuid import UUID
 
@@ -36,6 +37,9 @@ SHARED_JOB_COLUMNS = (
     "last_seen_at",
 )
 
+MIN_DATABASE_TIMESTAMP = datetime(1970, 1, 1, tzinfo=timezone.utc)
+MAX_DATABASE_TIMESTAMP = datetime(2100, 1, 1, tzinfo=timezone.utc)
+
 
 class SharedJobPublicationError(RuntimeError):
     pass
@@ -50,6 +54,36 @@ def _finite_optional_number(value: Any) -> Any | None:
         return value if math.isfinite(float(value)) else None
     except (TypeError, ValueError, OverflowError):
         return None
+
+
+def _bounded_optional_timestamp(value: Any) -> datetime | None:
+    """Normalize a timestamp and discard values outside the supported serving range."""
+
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    if hasattr(value, "to_pydatetime"):
+        value = value.to_pydatetime()
+    try:
+        if value != value:  # NaN/NaT scalar
+            return None
+    except (TypeError, ValueError):
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, date):
+        parsed = datetime.combine(value, time.min)
+    else:
+        try:
+            parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+        except (TypeError, ValueError, OverflowError):
+            return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    else:
+        parsed = parsed.astimezone(timezone.utc)
+    if not MIN_DATABASE_TIMESTAMP <= parsed < MAX_DATABASE_TIMESTAMP:
+        return None
+    return parsed
 
 
 class SharedJobsPublisher:
@@ -97,6 +131,11 @@ class SharedJobsPublisher:
                 "salary_min": _finite_optional_number(row.get("salary_min")),
                 "salary_max": _finite_optional_number(row.get("salary_max")),
                 "salary_currency": row.get("salary_currency") or "USD",
+                "posted_at": _bounded_optional_timestamp(
+                    row.get("posted_at", row.get("date_posted"))
+                ),
+                "first_seen_at": _bounded_optional_timestamp(row.get("first_seen_at")),
+                "last_seen_at": _bounded_optional_timestamp(row.get("last_seen_at")),
                 "job_description_hash": row.get("job_description_hash")
                 or hashlib.sha256(description.encode("utf-8")).hexdigest(),
             }

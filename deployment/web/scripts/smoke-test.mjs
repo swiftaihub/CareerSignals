@@ -1,4 +1,8 @@
-import { containsMixedContent, requestWithRetry } from "./smoke-test-helpers.mjs";
+import {
+  containsDuplicateBasePath,
+  containsMixedContent,
+  requestWithRetry
+} from "./smoke-test-helpers.mjs";
 
 const origin = (process.env.APP_ORIGIN || "https://jobs.swiftaihub.com").replace(/\/$/, "");
 const basePath = normalizeBasePath(process.env.APP_BASE_PATH || "/careersignals");
@@ -28,7 +32,9 @@ for (const path of publicPaths) {
   if (requireHttpsAssets && containsMixedContent(body)) {
     fail(`${path || "/"} contains mixed-content HTTP URLs`);
   }
-  if (body.includes(`${basePath}${basePath}`)) fail(`${path || "/"} contains a duplicate base path`);
+  if (containsDuplicateBasePath(body, basePath)) {
+    fail(`${path || "/"} contains a duplicate base path`);
+  }
   if (/\b(?:href|src)=["']\/(?!careersignals(?:\/|["'#?]))/i.test(body)) {
     fail(`${path || "/"} contains an application-root URL outside the base path`);
   }
@@ -69,6 +75,41 @@ if (expectedSourceSha) {
   }
   if (payload?.status !== "ok" || payload?.source_commit_sha !== expectedSourceSha) {
     fail("same-origin BFF health did not report the expected canonical source SHA");
+  }
+}
+
+const demoCookieNames = [
+  "careersignals-demo-token-v2",
+  "careersignals-demo-token"
+];
+const logout = await requestWithRetry(`${appUrl}/auth/logout`, {
+  requestInit: {
+    method: "POST",
+    headers: {
+      origin,
+      cookie: demoCookieNames.map((name) => `${name}=smoke-test`).join("; ")
+    }
+  }
+});
+if (logout.status !== 303) fail(`logout returned ${logout.status} instead of 303`);
+const logoutLocation = logout.headers.get("location");
+if (!logoutLocation || new URL(logoutLocation, origin).pathname !== (basePath || "/")) {
+  fail("logout did not redirect to the application home");
+}
+const logoutCookies = typeof logout.headers.getSetCookie === "function"
+  ? logout.headers.getSetCookie()
+  : [logout.headers.get("set-cookie") || ""];
+for (const name of demoCookieNames) {
+  const expiredAtAppPath = logoutCookies.some((cookie) => (
+    cookie.startsWith(`${name}=`)
+    && cookie.includes(`Path=${basePath || "/"};`)
+    && (
+      cookie.includes("Max-Age=0")
+      || cookie.includes("Expires=Thu, 01 Jan 1970 00:00:00 GMT")
+    )
+  ));
+  if (!expiredAtAppPath) {
+    fail(`logout did not expire ${name} at ${basePath || "/"}`);
   }
 }
 

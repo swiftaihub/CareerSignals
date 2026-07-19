@@ -47,6 +47,7 @@ def apply_shared_freshness_filter(
         "older_than_max_age": 0,
         "unknown_date_excluded": 0,
         "unknown_date_included": 0,
+        "future_date": 0,
         "disabled": 0,
     }
     if not freshness_filter.enabled:

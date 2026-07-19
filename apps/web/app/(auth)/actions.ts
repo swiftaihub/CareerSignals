@@ -4,14 +4,16 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
-import { buildAuthCallbackUrl, getCookiePath } from "@/lib/app-path";
+import { buildAppUrl, buildAuthCallbackUrl, getCookiePath } from "@/lib/app-path";
 import { DEMO_TOKEN_COOKIE, getCurrentUser } from "@/lib/auth";
 import { backendFetch, readBackendError } from "@/lib/backend";
 import {
   clearAppCookie,
   secureAppCookieOptions
 } from "@/lib/cookie-policy";
+import { DEMO_TOKEN_COOKIE_NAMES } from "@/lib/demo-cookie";
 import { safeRedirectPath } from "@/lib/navigation";
+import { clearAuthenticationSession } from "@/lib/logout";
 import {
   requestPasswordReset,
   updateAuthenticatedPassword,
@@ -51,6 +53,10 @@ const registerSchema = z.object({
   password: passwordSchema
 });
 
+function clearDemoCookies(cookieStore: Awaited<ReturnType<typeof cookies>>) {
+  DEMO_TOKEN_COOKIE_NAMES.forEach((name) => clearAppCookie(cookieStore, name));
+}
+
 async function createDemoSession() {
   const response = await backendFetch("/api/auth/demo-session", { method: "POST" });
   if (!response.ok) {
@@ -59,6 +65,7 @@ async function createDemoSession() {
   const payload = await response.json() as { demo_token: string; expires_at: string };
   const expiresAt = new Date(payload.expires_at);
   const cookieStore = await cookies();
+  clearDemoCookies(cookieStore);
   try {
     // Demo is a deliberate lower-privilege mode. Clear any local Supabase session
     // so an existing authenticated cookie cannot shadow the signed Demo identity.
@@ -95,7 +102,7 @@ export async function loginAction(_state: AuthActionState, formData: FormData): 
     if (result.error) {
       return { error: result.error.detail, errorCode: result.error.error_code };
     }
-    redirect(safeRedirectPath(formData.get("next")));
+    redirect(buildAppUrl(safeRedirectPath(formData.get("next"))));
   }
 
   let response: Response;
@@ -129,8 +136,8 @@ export async function loginAction(_state: AuthActionState, formData: FormData): 
   if (error) {
     return { error: "Your session could not be established.", errorCode: "INVALID_SESSION" };
   }
-  clearAppCookie(await cookies(), DEMO_TOKEN_COOKIE);
-  redirect(safeRedirectPath(formData.get("next")));
+  clearDemoCookies(await cookies());
+  redirect(buildAppUrl(safeRedirectPath(formData.get("next"))));
 }
 
 export async function registerAction(_state: AuthActionState, formData: FormData): Promise<AuthActionState> {
@@ -157,7 +164,7 @@ export async function registerAction(_state: AuthActionState, formData: FormData
     const error = await readBackendError(response);
     return { error: error.detail, errorCode: error.error_code };
   }
-  redirect("/pending?registered=1");
+  redirect(buildAppUrl("/pending?registered=1"));
 }
 
 export async function forgotPasswordAction(
@@ -253,7 +260,7 @@ export async function resetPasswordAction(
 
   await clearRecoveryCookies();
   const cookieStore = await cookies();
-  clearAppCookie(cookieStore, DEMO_TOKEN_COOKIE);
+  clearDemoCookies(cookieStore);
   clearAppCookie(cookieStore, RECOVERY_INTENT_COOKIE_NAME);
   try {
     const normalClient = await createClient();
@@ -262,7 +269,7 @@ export async function resetPasswordAction(
     // The isolated recovery credentials are already cleared. This only removes
     // a pre-existing ordinary session from the current browser when present.
   }
-  redirect("/login?password_reset=success");
+  redirect(buildAppUrl("/login?password_reset=success"));
 }
 
 export async function cancelPasswordRecoveryAction() {
@@ -274,14 +281,14 @@ export async function cancelPasswordRecoveryAction() {
   }
   await clearRecoveryCookies();
   const cookieStore = await cookies();
-  clearAppCookie(cookieStore, DEMO_TOKEN_COOKIE);
+  clearDemoCookies(cookieStore);
   try {
     const normalClient = await createClient();
     await normalClient.auth.signOut({ scope: "local" });
   } catch {
     // Returning to sign in must still work when Supabase is unavailable.
   }
-  redirect("/login");
+  redirect(buildAppUrl("/login"));
 }
 
 export async function changePasswordAction(
@@ -354,31 +361,20 @@ export async function changePasswordAction(
     // The server-side auth cookie adapter normally clears local state as part
     // of global sign-out; recovery/demo cookies are still removed explicitly.
   }
-  clearAppCookie(cookieStore, DEMO_TOKEN_COOKIE);
+  clearDemoCookies(cookieStore);
   await clearRecoveryCookies();
-  redirect("/login?password_changed=success");
+  redirect(buildAppUrl("/login?password_changed=success"));
 }
 
 export async function demoAction() {
   const result = await createDemoSession();
   if (result.error) {
-    redirect(`/login?error=${encodeURIComponent(result.error.error_code || "DEMO_UNAVAILABLE")}`);
+    redirect(buildAppUrl(`/login?error=${encodeURIComponent(result.error.error_code || "DEMO_UNAVAILABLE")}`));
   }
-  redirect("/dashboard");
+  redirect(buildAppUrl("/dashboard"));
 }
 
 export async function logoutAction() {
-  const supabase = await createClient();
-  await supabase.auth.signOut();
-  try {
-    const recoveryClient = await createWritableRecoveryClient();
-    await recoveryClient.auth.signOut({ scope: "local" });
-  } catch {
-    // Explicit cookie cleanup below still removes local recovery state.
-  }
-  await clearRecoveryCookies();
-  const cookieStore = await cookies();
-  clearAppCookie(cookieStore, DEMO_TOKEN_COOKIE);
-  clearAppCookie(cookieStore, RECOVERY_INTENT_COOKIE_NAME);
-  redirect("/");
+  await clearAuthenticationSession();
+  redirect(buildAppUrl("/"));
 }

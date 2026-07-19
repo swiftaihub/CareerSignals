@@ -9,6 +9,11 @@ from packages.careersignal_core.tasks.connector_refresh_worker import ConnectorR
 class FakeRepository:
     def __init__(self) -> None:
         self.finish_calls = []
+        self.stale_max_age_seconds = None
+
+    def fail_stale_running(self, *, max_age_seconds):
+        self.stale_max_age_seconds = max_age_seconds
+        return 1
 
     def claim_next(self):
         return {
@@ -66,6 +71,7 @@ class FakeLocks:
 
 class FakeSettings:
     user_pipeline_max_concurrency = 1
+    connector_refresh_max_seconds = 1800
 
 
 def _patch_worker_inputs(monkeypatch) -> None:
@@ -117,6 +123,13 @@ def test_worker_records_published_jobs_from_shared_execution(monkeypatch) -> Non
     assert repository.finish_calls[0]["shared_dbt_run_completed"] is True
     assert locks.global_released is True
     assert locks.writer_released is True
+
+
+def test_worker_recovers_orphaned_connector_runs(monkeypatch) -> None:
+    worker, repository, _ = _worker(monkeypatch, lambda **kwargs: {})
+
+    assert worker.recover_stale_runs() == 1
+    assert repository.stale_max_age_seconds == 1800
 
 
 def test_dbt_failure_uses_worker_lifecycle_status(monkeypatch) -> None:

@@ -79,3 +79,48 @@ def test_backend_health_check_is_bound_to_the_release_source_sha() -> None:
 
     assert 'expected_source_sha="$(basename "$release_dir")"' in script
     assert 'payload.get("source_commit_sha") != os.environ["EXPECTED_SOURCE_SHA"]' in script
+
+
+def test_backend_health_check_reports_bounded_redacted_service_logs_once() -> None:
+    script = _read("deployment/backend/scripts/health-check.sh")
+
+    assert '--tail 80 "$service"' in script
+    assert "credentials redacted" in script
+    assert "[REDACTED]" in script
+    assert 'careersignals-health-${expected_source_sha}-${service}.logged' in script
+    assert '"$reason" != "health is starting"' in script
+
+
+def test_duckdb_extension_tmpfs_allows_native_motherduck_loading() -> None:
+    compose = _read("deployment/backend/docker-compose.production.yml")
+    mount = next(
+        line.strip()
+        for line in compose.splitlines()
+        if "/home/careersignals/.duckdb:" in line
+    )
+
+    assert ":rw,exec,nosuid,nodev," in mount
+    assert "noexec" not in mount
+    assert "/tmp:rw,noexec,nosuid" in compose
+    assert "/app/dbt/target:rw,noexec,nosuid" in compose
+
+
+def test_production_daily_pipeline_limit_is_owned_by_the_api() -> None:
+    verifier = _read("deployment/backend/scripts/verify-environment.sh")
+
+    assert 'require_exact "$api_env" USER_PIPELINE_DAILY_LIMIT 4' in verifier
+    assert 'forbid_key "$worker_env" USER_PIPELINE_DAILY_LIMIT' in verifier
+    assert 'require_exact "$worker_env" USER_PIPELINE_MAX_CONCURRENCY 1' in verifier
+
+
+def test_production_worker_bounds_and_parallelizes_connector_refreshes() -> None:
+    compose = _read("deployment/backend/docker-compose.production.yml")
+
+    assert 'CONNECTOR_REFRESH_MAX_SECONDS: "1800"' in compose
+    assert 'CONNECTOR_SOURCE_MAX_CONCURRENCY: "5"' in compose
+
+
+def test_production_api_disables_first_user_bootstrap_without_removing_it() -> None:
+    compose = _read("deployment/backend/docker-compose.production.yml")
+
+    assert 'CONNECTOR_REFRESH_TRIGGER_MODE: "scheduled"' in compose

@@ -179,6 +179,16 @@ def test_postgres_dashboard_uses_aggregate_queries_and_preserves_demo_scope() ->
     )
 
 
+def test_postgres_job_reads_bound_legacy_timestamps_before_decoding() -> None:
+    repository = PostgresJobRepository(USER_UUID, store=_SummaryStore())  # type: ignore[arg-type]
+
+    sql = " ".join(repository._base_sql().casefold().split())
+
+    assert "jobs.posted_at >= timestamptz '1970-01-01'" in sql
+    assert "jobs.posted_at < timestamptz '2100-01-01'" in sql
+    assert "end as date_posted" in sql
+
+
 def test_repository_dependency_passes_verified_demo_role(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
 

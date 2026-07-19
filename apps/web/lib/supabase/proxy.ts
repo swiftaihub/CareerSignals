@@ -7,6 +7,7 @@ import {
   clearLegacyRootCookie,
   secureAppCookieOptions
 } from "@/lib/cookie-policy";
+import { DEMO_TOKEN_COOKIE_NAMES } from "@/lib/demo-cookie";
 import {
   extractSessionId,
   isRecoveryAuthCookieName,
@@ -224,7 +225,7 @@ function clearLegacyApplicationCookies(request: NextRequest, response: NextRespo
   if (getCookiePath() === "/") return;
   request.cookies.getAll().forEach(({ name }) => {
     if (
-      name === "careersignals-demo-token"
+      DEMO_TOKEN_COOKIE_NAMES.includes(name as typeof DEMO_TOKEN_COOKIE_NAMES[number])
       || name === RECOVERY_INTENT_COOKIE_NAME
       || isRecoveryAuthCookieName(name)
     ) {

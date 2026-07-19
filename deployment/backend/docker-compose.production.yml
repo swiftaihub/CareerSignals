@@ -14,7 +14,9 @@ x-application-service: &application-service
   tmpfs:
     - /tmp:rw,noexec,nosuid,size=128m
     - /run/careersignals:rw,noexec,nosuid,size=4m,uid=10001,gid=10001
-    - /home/careersignals/.duckdb:rw,noexec,nosuid,size=512m,uid=10001,gid=10001
+    # DuckDB maps the downloaded MotherDuck extension from this directory.
+    # Keep the mount narrow, ephemeral, unprivileged, and executable.
+    - /home/careersignals/.duckdb:rw,exec,nosuid,nodev,size=512m,uid=10001,gid=10001
     - /app/dbt/logs:rw,noexec,nosuid,size=64m,uid=10001,gid=10001
     - /app/dbt/target:rw,noexec,nosuid,size=256m,uid=10001,gid=10001
   stop_grace_period: 45s
@@ -36,6 +38,10 @@ services:
     environment:
       PYTHONUNBUFFERED: "1"
       PYTHONDONTWRITEBYTECODE: "1"
+      # Temporarily keep first-user requests on the last successful shared
+      # dataset. The bootstrap implementation remains available through the
+      # first_user_bootstrap/both modes outside this production override.
+      CONNECTOR_REFRESH_TRIGGER_MODE: "scheduled"
     expose:
       - "8000"
     healthcheck:
@@ -58,6 +64,8 @@ services:
       PYTHONUNBUFFERED: "1"
       PYTHONDONTWRITEBYTECODE: "1"
       CAREERSIGNAL_HEARTBEAT_PATH: /run/careersignals/worker.heartbeat
+      CONNECTOR_REFRESH_MAX_SECONDS: "1800"
+      CONNECTOR_SOURCE_MAX_CONCURRENCY: "5"
       USER_PIPELINE_MAX_CONCURRENCY: "1"
     healthcheck:
       test:

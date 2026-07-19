@@ -40,7 +40,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/lib/auth", () => ({
-  DEMO_TOKEN_COOKIE: "careersignals-demo-token",
+  DEMO_TOKEN_COOKIE: "careersignals-demo-token-v2",
   getCurrentUser: vi.fn()
 }));
 
@@ -69,6 +69,7 @@ describe("auth server-action redirects", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/careersignals");
+    vi.stubEnv("NEXT_PUBLIC_SITE_ORIGIN", "https://jobs.swiftaihub.com");
     mocks.backendFetch.mockResolvedValue(new Response(JSON.stringify({
       access_token: "access-token",
       refresh_token: "refresh-token"
@@ -82,7 +83,7 @@ describe("auth server-action redirects", () => {
     vi.unstubAllEnvs();
   });
 
-  it("gives Next a logical post-login route when next already includes the base path", async () => {
+  it("gives Next an absolute post-login route with exactly one base path", async () => {
     const formData = new FormData();
     formData.set("identifier", "career-user");
     formData.set("password", "correct-password");
@@ -90,12 +91,26 @@ describe("auth server-action redirects", () => {
 
     await expect(loginAction({}, formData)).rejects.toThrow("NEXT_REDIRECT");
 
-    expect(mocks.redirect).toHaveBeenCalledWith("/dashboard");
+    expect(mocks.redirect).toHaveBeenCalledWith(
+      "https://jobs.swiftaihub.com/careersignals/dashboard"
+    );
   });
 
-  it("gives Next the logical home route after logout", async () => {
+  it("gives Next the absolute application home route after logout", async () => {
     await expect(logoutAction()).rejects.toThrow("NEXT_REDIRECT");
 
-    expect(mocks.redirect).toHaveBeenCalledWith("/");
+    expect(mocks.redirect).toHaveBeenCalledWith(
+      "https://jobs.swiftaihub.com/careersignals"
+    );
+  });
+
+  it("redirects home even when remote session revocation throws", async () => {
+    mocks.ordinaryClient.auth.signOut.mockRejectedValueOnce(new Error("auth service unavailable"));
+
+    await expect(logoutAction()).rejects.toThrow("NEXT_REDIRECT");
+
+    expect(mocks.redirect).toHaveBeenCalledWith(
+      "https://jobs.swiftaihub.com/careersignals"
+    );
   });
 });

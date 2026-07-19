@@ -63,6 +63,17 @@ def test_freshness_decision_excludes_unknown_dates_by_default() -> None:
     assert decision.reason == "unknown_date_excluded"
 
 
+def test_freshness_decision_excludes_implausible_future_dates() -> None:
+    now = datetime(2026, 7, 8, 12, 0, tzinfo=timezone.utc)
+    config = FreshnessFilter(enabled=True, max_post_age_hours=24)
+    job = {"date_posted": "2099-01-01T00:00:00Z"}
+
+    decision = freshness_decision(job, config, now)
+
+    assert decision.keep is False
+    assert decision.reason == "future_date"
+
+
 def test_filter_jobs_by_posted_date_reports_stats() -> None:
     now = datetime(2026, 7, 8, 12, 0, tzinfo=timezone.utc)
     config = FreshnessFilter(enabled=True, max_post_age_hours=24)
@@ -70,12 +81,14 @@ def test_filter_jobs_by_posted_date_reports_stats() -> None:
         {"date_posted": "2026-07-08T10:00:00Z"},
         {"date_posted": "3 days ago"},
         {"date_posted": None},
+        {"date_posted": "2099-01-01T00:00:00Z"},
     ]
 
     filtered, stats = filter_jobs_by_posted_date(jobs, config, now)
 
     assert len(filtered) == 1
-    assert stats["input_jobs"] == 3
+    assert stats["input_jobs"] == 4
     assert stats["kept_jobs"] == 1
     assert stats["older_than_max_age"] == 1
     assert stats["unknown_date_excluded"] == 1
+    assert stats["future_date"] == 1

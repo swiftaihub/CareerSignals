@@ -17,11 +17,19 @@ from packages.careersignal_core.settings import AppSettings, get_settings
 LOGGER = logging.getLogger("careersignals.auth")
 
 
-@lru_cache(maxsize=1)
-def get_supabase_admin_client() -> Client:
+def create_supabase_auth_client() -> Client:
+    """Create an isolated client whose mutable Auth session is request-scoped."""
     settings = get_settings()
     settings.require_backend_service_role()
     return create_client(settings.supabase_url, settings.supabase_service_role_key.get_secret_value())
+
+
+@lru_cache(maxsize=1)
+def get_supabase_admin_client() -> Client:
+    # Admin operations may share this client because they never establish a
+    # user session. Login must use create_supabase_auth_client() directly:
+    # sign_in_with_password mutates the client's Authorization header.
+    return create_supabase_auth_client()
 
 
 def _value(obj: Any, name: str, default: Any = None) -> Any:
@@ -36,11 +44,13 @@ class AuthService:
         *,
         users: UserRepository | None = None,
         supabase: Client | None = None,
+        login_supabase: Client | None = None,
         settings: AppSettings | None = None,
     ) -> None:
         self.users = users or UserRepository()
         self.settings = settings or get_settings()
         self.supabase = supabase or get_supabase_admin_client()
+        self.login_supabase = login_supabase or supabase
 
     def login(self, identifier: str, password: str) -> dict[str, Any]:
         profile = self.users.resolve_login_identifier(identifier)
@@ -48,7 +58,11 @@ class AuthService:
         if profile is None or not profile.get("email") or profile.get("role") == "demo":
             raise APIError(401, "Invalid username/email or password.", "INVALID_CREDENTIALS")
         try:
-            response = self.supabase.auth.sign_in_with_password(
+            # Supabase Auth clients retain the signed-in user's session. Never
+            # let login replace the service-role authorization on the cached
+            # admin client used by registration and account administration.
+            login_supabase = self.login_supabase or create_supabase_auth_client()
+            response = login_supabase.auth.sign_in_with_password(
                 {"email": str(profile["email"]), "password": password}
             )
         except Exception as exc:
@@ -127,6 +141,12 @@ class AuthService:
                 raise APIError(422, "Password does not meet the authentication policy.", "WEAK_PASSWORD") from exc
             if auth_code in {"email_address_invalid", "email_address_not_authorized"}:
                 raise APIError(422, "This email address cannot be used for registration.", "INVALID_EMAIL") from exc
+            if auth_code in {"bad_jwt", "no_authorization", "not_admin", "session_not_found"}:
+                raise APIError(
+                    503,
+                    "Registration authentication is temporarily unavailable.",
+                    "REGISTRATION_AUTH_UNAVAILABLE",
+                ) from exc
             if isinstance(exc, AuthApiError) and auth_status in {400, 403, 422}:
                 raise APIError(422, "Supabase rejected the registration details.", "REGISTRATION_REJECTED") from exc
             raise APIError(503, "Registration is temporarily unavailable.", "REGISTRATION_UNAVAILABLE") from exc

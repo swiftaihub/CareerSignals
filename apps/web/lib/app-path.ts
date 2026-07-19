@@ -79,6 +79,22 @@ export function getAppUrl(
 }
 
 /**
+ * Builds an absolute URL inside this application. Server Actions use absolute
+ * destinations so both native form redirects and the Next client router keep
+ * exactly one configured base path.
+ */
+export function buildAppUrl(
+  path: string,
+  siteOrigin = getSiteOrigin(),
+  basePath = getBasePath()
+) {
+  return new URL(
+    withBasePath(path, basePath),
+    getSiteOrigin(siteOrigin, process.env.NODE_ENV)
+  ).toString();
+}
+
+/**
  * Prefixes an internal URL for native browser APIs and public assets. Already
  * prefixed paths are preserved, making the operation idempotent.
  */

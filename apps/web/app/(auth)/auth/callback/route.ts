@@ -2,11 +2,11 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
 import { getCookiePath, getSiteOrigin, withBasePath } from "@/lib/app-path";
-import { DEMO_TOKEN_COOKIE } from "@/lib/auth";
 import {
   clearAppCookie,
   secureAppCookieOptions
 } from "@/lib/cookie-policy";
+import { DEMO_TOKEN_COOKIE_NAMES } from "@/lib/demo-cookie";
 import {
   createRecoveryIntent,
   RECOVERY_INTENT_COOKIE_MAX_AGE_SECONDS,
@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
   }
 
   const cookieStore = await cookies();
-  clearAppCookie(cookieStore, DEMO_TOKEN_COOKIE);
+  DEMO_TOKEN_COOKIE_NAMES.forEach((name) => clearAppCookie(cookieStore, name));
   cookieStore.set(
     RECOVERY_INTENT_COOKIE_NAME,
     await createRecoveryIntent(result.value.identity, secret),
