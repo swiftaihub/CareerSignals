@@ -410,6 +410,8 @@ insert into public.user_job_daily_metrics (
     user_jobs_count,
     applied_jobs_count,
     interview_jobs_count,
+    new_user_jobs_count,
+    new_applied_jobs_count,
     personal_run_uuid,
     recorded_at
 )
@@ -418,6 +420,8 @@ select
     (now() at time zone 'America/New_York')::date,
     count(distinct matches.job_id)::integer,
     0,
+    0,
+    count(distinct matches.job_id)::integer,
     0,
     '00000000-0000-4000-8000-000000000021',
     now()
@@ -428,6 +432,8 @@ on conflict (user_uuid, metric_date) do update set
     user_jobs_count = excluded.user_jobs_count,
     applied_jobs_count = excluded.applied_jobs_count,
     interview_jobs_count = excluded.interview_jobs_count,
+    new_user_jobs_count = excluded.new_user_jobs_count,
+    new_applied_jobs_count = excluded.new_applied_jobs_count,
     personal_run_uuid = excluded.personal_run_uuid,
     recorded_at = excluded.recorded_at;
 

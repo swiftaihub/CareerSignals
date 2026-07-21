@@ -96,7 +96,8 @@ def test_user_cannot_select_another_users_metrics_or_status_events() -> None:
 
             retained_funnel = connection.execute(
                 """
-                select applied_jobs_count, interview_jobs_count
+                select applied_jobs_count, interview_jobs_count,
+                       new_user_jobs_count, new_applied_jobs_count
                 from public.user_job_daily_metrics
                 where user_uuid = %s::uuid
                 """,
@@ -113,6 +114,8 @@ def test_user_cannot_select_another_users_metrics_or_status_events() -> None:
             assert retained_funnel == {
                 "applied_jobs_count": 1,
                 "interview_jobs_count": 1,
+                "new_user_jobs_count": 0,
+                "new_applied_jobs_count": 1,
             }
             assert same_day_rows == {"count": 1}
 

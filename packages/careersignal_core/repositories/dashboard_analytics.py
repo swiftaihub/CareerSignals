@@ -73,6 +73,17 @@ def _as_date(value: Any) -> date:
     return date.fromisoformat(str(value))
 
 
+def _daily_new_count(
+    row: Mapping[str, Any] | None,
+    field: str,
+    *,
+    history_started: bool,
+) -> int | None:
+    if row is not None:
+        return int(row[field])
+    return 0 if history_started else None
+
+
 def build_daily_timeseries(
     *,
     global_rows: Iterable[Mapping[str, Any]],
@@ -81,29 +92,37 @@ def build_daily_timeseries(
     end_date: date,
     is_demo: bool = False,
 ) -> list[JobCountTimeseriesPoint]:
-    """Carry known end-of-day values forward, preserving unknown leading dates."""
+    """Build daily-new counts, filling zero only after history becomes reliable."""
 
     global_by_date = {_as_date(row["metric_date"]): row for row in global_rows}
     user_by_date = {_as_date(row["metric_date"]): row for row in user_rows}
-    prior_global_dates = [metric_date for metric_date in global_by_date if metric_date < start_date]
-    prior_user_dates = [metric_date for metric_date in user_by_date if metric_date < start_date]
-    prior_global = global_by_date[max(prior_global_dates)] if prior_global_dates else None
-    prior_user = user_by_date[max(prior_user_dates)] if prior_user_dates else None
-    global_jobs = (
-        int(prior_global["global_jobs_count"]) if prior_global is not None else None
-    )
-    user_jobs = int(prior_user["user_jobs_count"]) if prior_user is not None else None
-    applied_jobs = int(prior_user["applied_jobs_count"]) if prior_user is not None else None
+    global_history_start = min(global_by_date) if global_by_date else None
+    user_history_start = min(user_by_date) if user_by_date else None
     points: list[JobCountTimeseriesPoint] = []
     cursor = start_date
     while cursor <= end_date:
         global_row = global_by_date.get(cursor)
-        if global_row is not None:
-            global_jobs = int(global_row["global_jobs_count"])
         user_row = user_by_date.get(cursor)
-        if user_row is not None:
-            user_jobs = int(user_row["user_jobs_count"])
-            applied_jobs = int(user_row["applied_jobs_count"])
+        global_jobs = _daily_new_count(
+            global_row,
+            "new_global_jobs_count",
+            history_started=(
+                global_history_start is not None and cursor >= global_history_start
+            ),
+        )
+        user_history_started = (
+            user_history_start is not None and cursor >= user_history_start
+        )
+        user_jobs = _daily_new_count(
+            user_row,
+            "new_user_jobs_count",
+            history_started=user_history_started,
+        )
+        applied_jobs = _daily_new_count(
+            user_row,
+            "new_applied_jobs_count",
+            history_started=user_history_started,
+        )
         point = JobCountTimeseriesPoint(
             date=cursor,
             global_jobs=user_jobs if is_demo else global_jobs,
@@ -218,7 +237,7 @@ class DashboardAnalyticsRepository:
             if is_demo
             else self.store.fetch_all(
                 """
-                select metric_date, global_jobs_count
+                select metric_date, new_global_jobs_count
                 from public.global_job_daily_metrics
                 where metric_date between %s and %s
                    or metric_date = (
@@ -233,7 +252,7 @@ class DashboardAnalyticsRepository:
         )
         user_rows = self.store.fetch_all(
             """
-            select metric_date, user_jobs_count, applied_jobs_count
+            select metric_date, new_user_jobs_count, new_applied_jobs_count
             from public.user_job_daily_metrics
             where user_uuid = %s::uuid
               and (

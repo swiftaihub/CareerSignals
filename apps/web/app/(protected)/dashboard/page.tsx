@@ -111,7 +111,7 @@ export default function DashboardPage() {
 
         <SectionCard
           title="Job Volume Over Time"
-          description="Daily growth across the global market, your matches, and applications."
+          description="Jobs first added each day across the global market, your matches, and applications."
         >
           <JobVolumeTrendChart data={summary.job_count_timeseries} />
         </SectionCard>

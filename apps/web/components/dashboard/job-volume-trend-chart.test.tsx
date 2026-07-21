@@ -15,22 +15,22 @@ afterEach(cleanup);
 describe("JobVolumeTrendChart", () => {
   it("defines exactly the three required line series", () => {
     expect(JOB_VOLUME_SERIES.map((series) => [series.dataKey, series.name])).toEqual([
-      ["global_jobs", "Global Jobs"],
-      ["user_jobs", "Jobs for You"],
-      ["applied_jobs", "Applied Jobs"]
+      ["global_jobs", "New Global Jobs"],
+      ["user_jobs", "New Jobs for You"],
+      ["applied_jobs", "New Applications"]
     ]);
   });
 
   it("renders a proper empty state for absent and all-null history", () => {
     const { rerender } = render(<JobVolumeTrendChart data={[]} />);
-    expect(screen.getByText("No job volume history yet")).toBeInTheDocument();
+    expect(screen.getByText("No new-job history yet")).toBeInTheDocument();
 
     rerender(
       <JobVolumeTrendChart
         data={[{ date: "2026-07-12", global_jobs: null, user_jobs: null, applied_jobs: null }]}
       />
     );
-    expect(screen.getByText("No job volume history yet")).toBeInTheDocument();
+    expect(screen.getByText("No new-job history yet")).toBeInTheDocument();
   });
 
   it("preserves the full ISO date and sparse values for one-point history", () => {
@@ -40,8 +40,8 @@ describe("JobVolumeTrendChart", () => {
       />
     );
 
-    expect(screen.getByRole("img", { name: /daily job volume line chart/i })).toBeInTheDocument();
-    const table = screen.getByRole("table", { name: "Daily job volume values" });
+    expect(screen.getByRole("img", { name: /daily new-job line chart/i })).toBeInTheDocument();
+    const table = screen.getByRole("table", { name: "Daily new-job values" });
     expect(within(table).getByText("2026-07-12")).toBeInTheDocument();
     expect(within(table).getByText("2,450")).toBeInTheDocument();
     expect(within(table).getByText("27")).toBeInTheDocument();
@@ -59,7 +59,7 @@ describe("JobVolumeTrendChart", () => {
       />
     );
 
-    const table = screen.getByRole("table", { name: "Daily job volume values" });
+    const table = screen.getByRole("table", { name: "Daily new-job values" });
     expect(within(table).getAllByText("Not available")).toHaveLength(2);
     expect(within(table).queryByText("0")).not.toBeInTheDocument();
   });
@@ -75,7 +75,7 @@ describe("JobVolumeTrendChart", () => {
       />
     );
 
-    const table = screen.getByRole("table", { name: "Daily job volume values" });
+    const table = screen.getByRole("table", { name: "Daily new-job values" });
     expect(within(table).queryByText("2026-07-10")).not.toBeInTheDocument();
     expect(within(table).getByText("2026-07-11")).toBeInTheDocument();
     expect(within(table).getByText("2026-07-12")).toBeInTheDocument();
@@ -95,7 +95,7 @@ describe("JobVolumeTrendChart", () => {
     expect(screen.getByText("2,180")).toBeInTheDocument();
     expect(screen.getByText("281")).toBeInTheDocument();
     expect(screen.getByText("19")).toBeInTheDocument();
-    for (const label of ["Global Jobs", "Jobs for You", "Applied Jobs"]) {
+    for (const label of ["New Global Jobs", "New Jobs for You", "New Applications"]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
   });

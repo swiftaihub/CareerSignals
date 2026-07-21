@@ -18,9 +18,9 @@ import type { JobCountTimeSeriesPoint } from "@/lib/types";
 const NUMBER_FORMATTER = new Intl.NumberFormat("en-US");
 
 export const JOB_VOLUME_SERIES = [
-  { dataKey: "global_jobs", name: "Global Jobs", color: "hsl(var(--primary))" },
-  { dataKey: "user_jobs", name: "Jobs for You", color: "hsl(var(--accent))" },
-  { dataKey: "applied_jobs", name: "Applied Jobs", color: "hsl(var(--success))" }
+  { dataKey: "global_jobs", name: "New Global Jobs", color: "hsl(var(--primary))" },
+  { dataKey: "user_jobs", name: "New Jobs for You", color: "hsl(var(--accent))" },
+  { dataKey: "applied_jobs", name: "New Applications", color: "hsl(var(--success))" }
 ] as const satisfies ReadonlyArray<{
   dataKey: keyof Omit<JobCountTimeSeriesPoint, "date">;
   name: string;
@@ -91,8 +91,8 @@ export function JobVolumeTrendChart({ data }: { data: JobCountTimeSeriesPoint[] 
     return (
       <div className="min-h-80 [&>div]:min-h-80">
         <EmptyState
-          title="No job volume history yet"
-          description="Daily history will appear after the first reliable analytics snapshot is recorded."
+          title="No new-job history yet"
+          description="Daily additions will appear after the first reliable analytics snapshot is recorded."
         />
       </div>
     );
@@ -101,7 +101,7 @@ export function JobVolumeTrendChart({ data }: { data: JobCountTimeSeriesPoint[] 
   return (
     <>
       <div
-        aria-label="Daily job volume line chart with Global Jobs, Jobs for You, and Applied Jobs series."
+        aria-label="Daily new-job line chart with New Global Jobs, New Jobs for You, and New Applications series."
         className="h-80 min-h-80 w-full"
         role="img"
       >
@@ -118,7 +118,7 @@ export function JobVolumeTrendChart({ data }: { data: JobCountTimeSeriesPoint[] 
             <YAxis
               allowDecimals={false}
               label={{
-                value: "Number of Jobs",
+                value: "New Jobs",
                 angle: -90,
                 position: "insideLeft",
                 fill: "hsl(var(--muted-foreground))",
@@ -152,7 +152,7 @@ export function JobVolumeTrendChart({ data }: { data: JobCountTimeSeriesPoint[] 
       </div>
 
       <table className="sr-only">
-        <caption>Daily job volume values</caption>
+        <caption>Daily new-job values</caption>
         <thead>
           <tr>
             <th>Date</th>
