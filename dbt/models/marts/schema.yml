@@ -24,12 +24,11 @@ models:
       - name: run_uuid
         data_tests: [not_null]
       - name: job_id
-        data_tests:
-          - not_null
-          - relationships:
-              arguments:
-                to: ref('mart_shared_canonical_jobs')
-                field: job_id
+        description: >-
+          The current user/run relationship to the current shared snapshot is
+          validated by assert_user_result_references_shared_job. Historical
+          user/run partitions intentionally outlive shared connector snapshots.
+        data_tests: [not_null]
       - name: job_title
         data_tests: [not_null]
       - name: match_score
