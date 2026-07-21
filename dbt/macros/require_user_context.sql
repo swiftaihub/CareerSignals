@@ -28,3 +28,25 @@
         {% endfor %}
     {% endif %}
 {% endmacro %}
+
+{% macro validate_shared_context() %}
+    {% set raw_value = var('connector_run_uuid', none) %}
+    {% if execute and raw_value is not none and raw_value | string | trim != '' %}
+        {% set value = raw_value | string | trim | lower %}
+        {% set compact = value | replace('-', '') %}
+        {% set state = namespace(invalid=false) %}
+        {% if value | length != 36 or value[8] != '-' or value[13] != '-' or value[18] != '-' or value[23] != '-' or compact | length != 32 %}
+            {% set state.invalid = true %}
+        {% endif %}
+        {% for character in compact %}
+            {% if character not in '0123456789abcdef' %}
+                {% set state.invalid = true %}
+            {% endif %}
+        {% endfor %}
+        {% if state.invalid %}
+            {{ exceptions.raise_compiler_error(
+                "connector_run_uuid must be a canonical UUID for shared_refresh"
+            ) }}
+        {% endif %}
+    {% endif %}
+{% endmacro %}

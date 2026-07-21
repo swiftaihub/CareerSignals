@@ -1,3 +1,4 @@
+{% do validate_shared_context() %}
 {{ config(
     materialized='incremental',
     schema='mart',

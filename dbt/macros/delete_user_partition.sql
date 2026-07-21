@@ -20,6 +20,10 @@
 {% endmacro %}
 
 {% macro purge_unscoped_shared_rows() %}
+    {% set connector_run_uuid = var('connector_run_uuid', none) %}
     delete from {{ this }}
     where connector_run_uuid is null
+    {% if connector_run_uuid is not none and connector_run_uuid | string | trim != '' %}
+       or connector_run_uuid != '{{ connector_run_uuid }}'
+    {% endif %}
 {% endmacro %}

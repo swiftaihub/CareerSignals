@@ -1,3 +1,4 @@
+{% do validate_shared_context() %}
 {{ config(
     materialized='incremental',
     schema='staging',
@@ -46,6 +47,10 @@ select
 from {{ source('staging', 'shared_jobs_processed') }}
 where job_id is not null
   and connector_run_uuid is not null
+{% set connector_run_uuid = var('connector_run_uuid', none) %}
+{% if connector_run_uuid is not none and connector_run_uuid | string | trim != '' %}
+  and connector_run_uuid = '{{ connector_run_uuid }}'
+{% endif %}
 {% if is_incremental() %}
   and inserted_at >= coalesce((select max(inserted_at) from {{ this }}), timestamp '1900-01-01')
 {% endif %}

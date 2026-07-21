@@ -58,7 +58,7 @@ const SUMMARY: DashboardSummary = {
     total_interviews: 6
   },
   job_count_timeseries: [
-    { date: "2026-07-12", global_jobs: 2450, user_jobs: 318, applied_jobs: 27 }
+    { date: "2026-07-12", global_jobs: 120, user_jobs: 18, applied_jobs: 3 }
   ],
   analytics_window: {
     start_date: "2026-06-13",
@@ -100,6 +100,11 @@ describe("DashboardPage analytics", () => {
     expect(screen.getByText("Total Jobs")).toBeInTheDocument();
     expect(screen.getByText("Funnel visualization")).toBeInTheDocument();
     expect(screen.getByText("Volume visualization")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Jobs first added each day across the global market, your matches, and applications."
+      )
+    ).toBeInTheDocument();
   });
 
   it("uses the existing API failure state", async () => {

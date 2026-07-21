@@ -22,6 +22,7 @@ EXPECTED_MIGRATIONS = [
     "0016_pipeline_quota_resets.sql",
     "0017_dashboard_job_search_analytics.sql",
     "0018_finite_salary_metrics.sql",
+    "0019_dashboard_daily_new_jobs.sql",
 ]
 
 RLS_TABLES = {
@@ -183,6 +184,20 @@ def test_non_finite_salaries_are_cleaned_and_rejected() -> None:
     assert "salary_max::text in ('nan', 'infinity', '-infinity')" in migration
     assert "job_postings_salary_min_finite_check" in migration
     assert "job_postings_salary_max_finite_check" in migration
+
+
+def test_dashboard_daily_new_metrics_are_separate_from_funnel_totals() -> None:
+    migration = _sql("0019_dashboard_daily_new_jobs.sql")
+
+    assert "add column new_global_jobs_count" in migration
+    assert "add column new_user_jobs_count" in migration
+    assert "add column new_applied_jobs_count" in migration
+    assert "first_seen_at >= window_start" in migration
+    assert "min(matches.created_at) >= window_start" in migration
+    assert "min(events.changed_at) >= window_start" in migration
+    assert "new_global_jobs_count = excluded.new_global_jobs_count" in migration
+    assert "new_user_jobs_count = excluded.new_user_jobs_count" in migration
+    assert "global_jobs_count = excluded.global_jobs_count" in migration
 
 
 def test_demo_seed_is_fixed_read_only_and_has_exactly_twenty_jobs() -> None:

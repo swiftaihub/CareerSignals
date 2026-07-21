@@ -45,6 +45,7 @@ def deduplicate_jobs(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     deduped: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
     seen_links: set[str] = set()
+    similarity_buckets: dict[tuple[str, str], list[dict[str, Any]]] = {}
 
     for job in jobs:
         job_id = _norm(job.get("job_id"))
@@ -54,10 +55,13 @@ def deduplicate_jobs(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         if link and link in seen_links:
             continue
-        if any(_is_company_title_location_duplicate(job, existing) for existing in deduped):
+        bucket_key = (_norm(job.get("company")), _norm(job.get("location")))
+        candidates = similarity_buckets.get(bucket_key, [])
+        if any(_is_company_title_location_duplicate(job, existing) for existing in candidates):
             continue
 
         deduped.append(job)
+        similarity_buckets.setdefault(bucket_key, []).append(job)
         if job_id:
             seen_ids.add(job_id)
         if link:

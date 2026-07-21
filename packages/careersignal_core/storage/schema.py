@@ -57,6 +57,17 @@ TABLE_SQL = [
     )
     """,
     """
+    create table if not exists raw.greenhouse_job_state (
+        board_key varchar,
+        job_post_id varchar,
+        upstream_updated_at varchar,
+        first_published_at varchar,
+        detail_payload json,
+        cached_at timestamp,
+        primary key (board_key, job_post_id)
+    )
+    """,
+    """
     create table if not exists staging.python_jobs_processed (
         job_id varchar,
         run_id varchar,

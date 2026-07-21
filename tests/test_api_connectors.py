@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import logging
 from typing import Any
 
 from src.config.loader import load_configs
+from src.config.schemas import JobCategoryConfig
 from src.connectors.adzuna_connector import AdzunaConnector
 from src.connectors.greenhouse_connector import GreenhouseConnector
 from src.connectors.lever_connector import LeverConnector
@@ -139,27 +141,37 @@ def test_greenhouse_connector_fetches_board_and_filters_category() -> None:
                     {
                         "id": 123,
                         "title": "Healthcare Analytics Engineer",
-                        "absolute_url": "https://boards.greenhouse.io/medmetric/jobs/123",
                         "updated_at": "2026-07-08T12:00:00Z",
-                        "location": {"name": "Philadelphia, PA"},
-                        "departments": [{"name": "Data"}],
-                        "content": "SQL Python dbt healthcare analytics dashboards.",
+                        "absolute_url": "https://boards.greenhouse.io/medmetric/jobs/123",
                     }
                 ]
+            },
+            {
+                "id": 123,
+                "title": "Healthcare Analytics Engineer",
+                "first_published": "2026-07-08T12:00:00Z",
+                "updated_at": "2026-07-08T12:00:00Z",
+                "absolute_url": "https://boards.greenhouse.io/medmetric/jobs/123",
+                "location": {"name": "Philadelphia, PA"},
+                "departments": [{"name": "Data"}],
+                "content": "SQL Python dbt healthcare analytics dashboards.",
             }
         ]
     )
     connector = GreenhouseConnector(
         company_tokens=["medmetric"],
         session=session,  # type: ignore[arg-type]
+        now_provider=lambda: datetime(2026, 7, 9, 11, 0, tzinfo=timezone.utc),
     )
 
     jobs = connector.fetch_jobs(_category("Healthcare Analytics Engineer"))
 
     assert jobs[0]["source"] == "greenhouse"
     assert jobs[0]["company"] == "medmetric"
-    assert jobs[0]["date_posted"] == "2026-07-08"
+    assert jobs[0]["date_posted"] == "2026-07-08T12:00:00Z"
     assert jobs[0]["category_name"] == "Healthcare Analytics Engineer"
+    assert len(session.calls) == 2
+    assert session.calls[0]["params"] == {}
 
 
 def test_greenhouse_connector_logs_each_uncached_board_without_tokens(caplog) -> None:
@@ -170,9 +182,16 @@ def test_greenhouse_connector_logs_each_uncached_board_without_tokens(caplog) ->
                     {
                         "id": 123,
                         "title": "Healthcare Analytics Engineer",
-                        "content": "SQL Python healthcare analytics dashboards.",
+                        "updated_at": "2026-07-09T10:00:00Z",
                     }
                 ]
+            },
+            {
+                "id": 123,
+                "title": "Healthcare Analytics Engineer",
+                "first_published": "2026-07-09T10:00:00Z",
+                "updated_at": "2026-07-09T10:00:00Z",
+                "content": "SQL Python healthcare analytics dashboards.",
             },
             {"jobs": []},
         ]
@@ -180,6 +199,7 @@ def test_greenhouse_connector_logs_each_uncached_board_without_tokens(caplog) ->
     connector = GreenhouseConnector(
         company_tokens=["first-company-secret", "second-company-secret"],
         session=session,  # type: ignore[arg-type]
+        now_provider=lambda: datetime(2026, 7, 9, 11, 0, tzinfo=timezone.utc),
     )
     category = _category("Healthcare Analytics Engineer")
     caplog.set_level(logging.INFO, logger="src.connectors.greenhouse_connector")
@@ -188,7 +208,7 @@ def test_greenhouse_connector_logs_each_uncached_board_without_tokens(caplog) ->
     second_jobs = connector.fetch_jobs(category)
 
     assert second_jobs == first_jobs
-    assert len(session.calls) == 2
+    assert len(session.calls) == 3
     progress_logs = [
         record.getMessage()
         for record in caplog.records
@@ -200,6 +220,158 @@ def test_greenhouse_connector_logs_each_uncached_board_without_tokens(caplog) ->
     assert "board=2/2, jobs=0, elapsed_ms=" in progress_logs[1]
     assert "first-company-secret" not in caplog.text
     assert "second-company-secret" not in caplog.text
+
+
+def test_greenhouse_connector_reuses_persisted_detail_state() -> None:
+    listed_payload = {
+        "jobs": [
+            {
+                "id": 123,
+                "title": "Healthcare Analytics Engineer",
+                "updated_at": "2026-07-09T10:00:00Z",
+                "absolute_url": "https://boards.greenhouse.io/medmetric/jobs/123",
+            }
+        ]
+    }
+    detail_payload = {
+        "id": 123,
+        "title": "Healthcare Analytics Engineer",
+        "first_published": "2026-07-09T10:00:00Z",
+        "updated_at": "2026-07-09T10:00:00Z",
+        "absolute_url": "https://boards.greenhouse.io/medmetric/jobs/123",
+        "content": "SQL Python healthcare analytics dashboards.",
+    }
+
+    def now() -> datetime:
+        return datetime(2026, 7, 9, 11, 0, tzinfo=timezone.utc)
+
+    first_session = FakeSession([listed_payload, detail_payload])
+    first_connector = GreenhouseConnector(
+        company_tokens=["medmetric"],
+        session=first_session,  # type: ignore[arg-type]
+        now_provider=now,
+    )
+
+    first_jobs = first_connector.fetch_jobs(_category("Healthcare Analytics Engineer"))
+    persisted_state = {
+        (update["board_key"], update["job_post_id"]): update
+        for update in first_connector.state_updates
+    }
+    second_session = FakeSession([listed_payload])
+    second_connector = GreenhouseConnector(
+        company_tokens=["medmetric"],
+        session=second_session,  # type: ignore[arg-type]
+        state=persisted_state,
+        now_provider=now,
+    )
+
+    second_jobs = second_connector.fetch_jobs(_category("Healthcare Analytics Engineer"))
+
+    assert second_jobs == first_jobs
+    assert len(first_session.calls) == 2
+    assert len(second_session.calls) == 1
+    assert second_connector.state_updates == []
+
+
+def test_greenhouse_cold_cache_skips_details_for_old_inventory() -> None:
+    session = FakeSession(
+        [
+            {
+                "jobs": [
+                    {"id": 1, "updated_at": "2026-07-07T11:59:59Z"},
+                    {"id": 2, "updated_at": "2026-07-09T11:00:00Z"},
+                ]
+            },
+            {
+                "id": 2,
+                "title": "Analytics Engineer",
+                "first_published": "2026-07-09T10:00:00Z",
+                "content": "Build data analytics systems.",
+            },
+        ]
+    )
+    connector = GreenhouseConnector(
+        company_tokens=["medmetric"],
+        session=session,  # type: ignore[arg-type]
+        now_provider=lambda: datetime(2026, 7, 9, 12, 0, tzinfo=timezone.utc),
+    )
+
+    jobs = connector.fetch_jobs(_category("Analytics Engineer"))
+
+    assert [job["external_id"] for job in jobs] == ["2"]
+    assert len(session.calls) == 2
+    assert session.calls[1]["url"].endswith("/jobs/2")
+    assert len(connector.state_updates) == 1
+
+
+def test_greenhouse_connector_uses_strict_first_published_24_hour_boundary() -> None:
+    session = FakeSession(
+        [
+            {
+                "jobs": [
+                    {"id": 1, "updated_at": "2026-07-09T11:00:00Z"},
+                    {"id": 2, "updated_at": "2026-07-09T11:00:00Z"},
+                ]
+            },
+            {
+                "id": 1,
+                "title": "Analytics Engineer",
+                "first_published": "2026-07-08T12:00:00Z",
+                "content": "Build data analytics systems.",
+            },
+            {
+                "id": 2,
+                "title": "Analytics Engineer",
+                "first_published": "2026-07-08T11:59:59Z",
+                "content": "Build data analytics systems.",
+            },
+        ]
+    )
+    connector = GreenhouseConnector(
+        company_tokens=["medmetric"],
+        session=session,  # type: ignore[arg-type]
+        detail_concurrency=1,
+        now_provider=lambda: datetime(2026, 7, 9, 12, 0, tzinfo=timezone.utc),
+    )
+
+    jobs = connector.fetch_jobs(_category("Analytics Engineer"))
+
+    assert [job["external_id"] for job in jobs] == ["1"]
+    assert jobs[0]["date_posted"] == "2026-07-08T12:00:00Z"
+    assert len(connector.state_updates) == 2
+
+
+def test_greenhouse_bulk_fetch_assigns_each_job_to_first_matching_category() -> None:
+    session = FakeSession(
+        [
+            {"jobs": [{"id": 1, "updated_at": "2026-07-09T11:00:00Z"}]},
+            {
+                "id": 1,
+                "title": "Senior Analytics Engineer",
+                "first_published": "2026-07-09T10:00:00Z",
+                "content": "Data analytics and cloud software.",
+            },
+        ]
+    )
+    first_category = JobCategoryConfig(
+        category_name="Analytics",
+        search_titles=["Analytics Engineer"],
+    )
+    second_category = JobCategoryConfig(
+        category_name="Data",
+        industries=["data"],
+    )
+    connector = GreenhouseConnector(
+        company_tokens=["medmetric"],
+        session=session,  # type: ignore[arg-type]
+        now_provider=lambda: datetime(2026, 7, 9, 12, 0, tzinfo=timezone.utc),
+    )
+
+    jobs = connector.fetch_jobs_for_categories([first_category, second_category])
+
+    assert len(jobs) == 1
+    assert jobs[0]["category_name"] == "Analytics"
+    assert jobs[0]["_careersignal_category"] == first_category
 
 
 def test_lever_connector_fetches_site_and_filters_category() -> None:

@@ -1,7 +1,7 @@
 # Database migrations and rollback
 
 CareerSignals uses an ordered, forward-only Supabase migration stack in
-`supabase/migrations`. The eighteen files must be applied in numeric order. They
+`supabase/migrations`. The nineteen files must be applied in numeric order. They
 create the PostgreSQL control plane, serving tables, helper functions, RLS,
 constraints, and indexes. No migration or seed contains credentials.
 
@@ -50,11 +50,16 @@ and identity always comes from the verified session.
 - Archived never qualifies on its own; only trustworthy earlier status events
   can make it count as applied or interviewed.
 
-The migration writes one reliable current-day snapshot and does not synthesize
-older history. Within an API window, a known end-of-day value carries forward
-until the next snapshot. Dates for which every series is unknown are omitted,
-never fabricated as zeroes. The fixed Demo tenant derives both global and
-personal history from its own 20-job fixture partition.
+The **Job Volume Over Time** trend is deliberately not a copy of those funnel
+totals. Its three series represent jobs first observed globally that day, jobs
+first matched to the user that day, and jobs first reaching an applied-or-later
+state that day. All calendar boundaries use `America/New_York`.
+
+The daily-new migration reconstructs existing snapshot dates from immutable
+first-seen, first-match, and application-event timestamps. After a series has
+a reliable history boundary, a day without additions is represented by zero;
+leading dates before that boundary remain unknown. The fixed Demo tenant
+derives both global and personal history from its own 20-job fixture partition.
 
 ## Important invariants
 
@@ -75,9 +80,9 @@ personal history from its own 20-job fixture partition.
   personal runs retain that bundle UUID in addition to their immutable JSON
   snapshot; legacy runs remain valid with a null bundle reference.
 - RLS is enabled and forced on every application/control-plane table.
-- Dashboard job-search analytics read indexed daily snapshots; application
-  status transitions are immutable and tenant-scoped. Dates before the first
-  reliable snapshot remain unknown rather than being backfilled with zeros.
+- Dashboard job-search analytics keep cumulative funnel totals separate from
+  indexed daily-new snapshots; application status transitions are immutable
+  and tenant-scoped. Dates before the first reliable snapshot remain unknown.
 - Demo rows have a service-role-resistant trigger guard. Only the transaction-
   local seed override in the deterministic seed may write them.
 - Connector internal error fields are Admin/service-only; user-facing freshness

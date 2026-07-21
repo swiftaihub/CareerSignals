@@ -50,17 +50,17 @@ class _Store:
         return self.funnels.get(str(params[0]), {})
 
 
-def test_sparse_series_carries_forward_only_after_first_known_snapshot() -> None:
+def test_sparse_series_uses_daily_new_counts_and_zero_fills_known_gaps() -> None:
     points = build_daily_timeseries(
         global_rows=[
-            {"metric_date": date(2026, 7, 10), "global_jobs_count": 100},
-            {"metric_date": date(2026, 7, 12), "global_jobs_count": 120},
+            {"metric_date": date(2026, 7, 10), "new_global_jobs_count": 10},
+            {"metric_date": date(2026, 7, 12), "new_global_jobs_count": 4},
         ],
         user_rows=[
             {
                 "metric_date": date(2026, 7, 11),
-                "user_jobs_count": 9,
-                "applied_jobs_count": 2,
+                "new_user_jobs_count": 3,
+                "new_applied_jobs_count": 2,
             }
         ],
         start_date=date(2026, 7, 9),
@@ -68,9 +68,9 @@ def test_sparse_series_carries_forward_only_after_first_known_snapshot() -> None
     )
 
     assert [point.as_dict() for point in points] == [
-        {"date": date(2026, 7, 10), "global_jobs": 100, "user_jobs": None, "applied_jobs": None},
-        {"date": date(2026, 7, 11), "global_jobs": 100, "user_jobs": 9, "applied_jobs": 2},
-        {"date": date(2026, 7, 12), "global_jobs": 120, "user_jobs": 9, "applied_jobs": 2},
+        {"date": date(2026, 7, 10), "global_jobs": 10, "user_jobs": None, "applied_jobs": None},
+        {"date": date(2026, 7, 11), "global_jobs": 0, "user_jobs": 3, "applied_jobs": 2},
+        {"date": date(2026, 7, 12), "global_jobs": 4, "user_jobs": 0, "applied_jobs": 0},
     ]
 
 
@@ -82,7 +82,7 @@ def test_unknown_days_are_omitted_but_known_zero_days_are_retained() -> None:
         end_date=date(2026, 7, 10),
     )
     known_zero = build_daily_timeseries(
-        global_rows=[{"metric_date": date(2026, 7, 10), "global_jobs_count": 0}],
+        global_rows=[{"metric_date": date(2026, 7, 10), "new_global_jobs_count": 0}],
         user_rows=[],
         start_date=date(2026, 7, 9),
         end_date=date(2026, 7, 10),
@@ -99,14 +99,14 @@ def test_unknown_days_are_omitted_but_known_zero_days_are_retained() -> None:
     ]
 
 
-def test_snapshot_before_window_is_used_as_carry_forward_baseline() -> None:
+def test_snapshot_before_window_establishes_zero_filled_history_not_a_total() -> None:
     points = build_daily_timeseries(
-        global_rows=[{"metric_date": date(2026, 6, 30), "global_jobs_count": 88}],
+        global_rows=[{"metric_date": date(2026, 6, 30), "new_global_jobs_count": 8}],
         user_rows=[
             {
                 "metric_date": date(2026, 6, 29),
-                "user_jobs_count": 7,
-                "applied_jobs_count": 1,
+                "new_user_jobs_count": 7,
+                "new_applied_jobs_count": 1,
             }
         ],
         start_date=date(2026, 7, 1),
@@ -114,19 +114,19 @@ def test_snapshot_before_window_is_used_as_carry_forward_baseline() -> None:
     )
 
     assert [(point.global_jobs, point.user_jobs, point.applied_jobs) for point in points] == [
-        (88, 7, 1),
-        (88, 7, 1),
+        (0, 0, 0),
+        (0, 0, 0),
     ]
 
 
 def test_demo_series_uses_only_its_fixture_scoped_user_history() -> None:
     points = build_daily_timeseries(
-        global_rows=[{"metric_date": date(2026, 7, 12), "global_jobs_count": 9999}],
+        global_rows=[{"metric_date": date(2026, 7, 12), "new_global_jobs_count": 9999}],
         user_rows=[
             {
                 "metric_date": date(2026, 7, 12),
-                "user_jobs_count": 20,
-                "applied_jobs_count": 0,
+                "new_user_jobs_count": 20,
+                "new_applied_jobs_count": 0,
             }
         ],
         start_date=date(2026, 7, 12),
@@ -172,15 +172,15 @@ def test_analytics_reads_are_scoped_to_the_requested_verified_tenant() -> None:
         USER_A: [
             {
                 "metric_date": date(2026, 7, 12),
-                "user_jobs_count": 3,
-                "applied_jobs_count": 2,
+                "new_user_jobs_count": 3,
+                "new_applied_jobs_count": 2,
             }
         ],
         USER_B: [
             {
                 "metric_date": date(2026, 7, 12),
-                "user_jobs_count": 8,
-                "applied_jobs_count": 4,
+                "new_user_jobs_count": 8,
+                "new_applied_jobs_count": 4,
             }
         ],
     }
@@ -197,7 +197,15 @@ def test_analytics_reads_are_scoped_to_the_requested_verified_tenant() -> None:
     assert summary_b.funnel.total_user_jobs == 8
     assert summary_a.job_count_timeseries[-1].user_jobs == 3
     assert summary_b.job_count_timeseries[-1].user_jobs == 8
+    global_query = next(
+        statement
+        for statement, _ in store.fetch_all_calls
+        if "global_job_daily_metrics" in statement
+    )
     user_queries = [call for call in store.fetch_all_calls if "user_job_daily_metrics" in call[0]]
+    assert "new_global_jobs_count" in global_query
+    assert all("new_user_jobs_count" in statement for statement, _ in user_queries)
+    assert all("new_applied_jobs_count" in statement for statement, _ in user_queries)
     assert user_queries[0][1][0] == USER_A
     assert user_queries[0][1][3] == USER_A
     assert user_queries[1][1][0] == USER_B

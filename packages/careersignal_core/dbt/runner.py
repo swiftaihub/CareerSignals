@@ -79,11 +79,22 @@ def _run_dbt_command(
 def run_shared_dbt_build(
     project_dir: str | Path | None = None,
     profiles_dir: str | Path | None = None,
+    *,
+    connector_run_uuid: str | UUID | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Build and test only platform-shared dbt resources."""
 
+    args = ["build", "--selector", SHARED_SELECTOR]
+    if connector_run_uuid is not None:
+        connector_run = _validate_uuid(connector_run_uuid, "connector_run_uuid")
+        variables = json.dumps(
+            {"connector_run_uuid": connector_run},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        args.extend(["--vars", variables])
     return _run_dbt_command(
-        ["build", "--selector", SHARED_SELECTOR],
+        args,
         project_dir=project_dir,
         profiles_dir=profiles_dir,
     )
