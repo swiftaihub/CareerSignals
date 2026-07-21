@@ -36,6 +36,13 @@ class TrackingConnector:
         return []
 
 
+class SuccessfulConnector:
+    source_name = "successful-source"
+
+    def fetch_jobs(self, category: JobCategoryConfig):
+        return [{"external_id": "record-1"}]
+
+
 def test_connector_exception_text_is_not_logged_or_persisted(caplog) -> None:
     connector = FailingConnector()
     category = JobCategoryConfig(
@@ -89,3 +96,31 @@ def test_connector_sources_are_collected_concurrently() -> None:
     )
 
     assert state["maximum"] == 2
+
+
+def test_connector_source_logs_start_and_completion_without_changing_results(caplog) -> None:
+    connector = SuccessfulConnector()
+    category = JobCategoryConfig(
+        category_name="Analytics",
+        search_titles=["Analytics Engineer"],
+    )
+    caplog.set_level(logging.INFO, logger="src.pipelines.shared_connector_refresh")
+
+    records, errors = collect_connector_jobs(
+        [connector],  # type: ignore[list-item]
+        [category],
+    )
+
+    assert records == [
+        {
+            "external_id": "record-1",
+            "_careersignal_category": category,
+            "_careersignal_source": "successful-source",
+        }
+    ]
+    assert errors == []
+    assert "Connector successful-source started (categories=1)" in caplog.text
+    assert (
+        "Connector successful-source completed "
+        "(records=1, errors=0, elapsed_seconds="
+    ) in caplog.text

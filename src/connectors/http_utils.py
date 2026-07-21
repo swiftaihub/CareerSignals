@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -67,6 +68,7 @@ def safe_get_json(
 ) -> dict[str, Any] | list[Any] | None:
     """Execute a GET request and return parsed JSON, logging recoverable failures."""
 
+    started_at = time.monotonic()
     try:
         response = session.get(url, params=params, headers=headers, timeout=timeout)
         response.raise_for_status()
@@ -87,6 +89,15 @@ def safe_get_json(
             type(exc).__name__,
         )
         return None
+
+    elapsed_ms = round((time.monotonic() - started_at) * 1000)
+    LOGGER.info(
+        "%s request succeeded for %s (status=%s, elapsed_ms=%s)",
+        source_name,
+        _safe_url_for_log(url),
+        response.status_code,
+        elapsed_ms,
+    )
 
     if not isinstance(payload, dict | list):
         LOGGER.warning("%s returned unexpected JSON payload type: %s", source_name, type(payload))

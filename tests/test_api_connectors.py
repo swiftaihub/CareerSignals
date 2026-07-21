@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from src.config.loader import load_configs
@@ -11,6 +12,8 @@ from src.connectors.usajobs_connector import USAJobsConnector
 
 
 class FakeResponse:
+    status_code = 200
+
     def __init__(self, payload: dict[str, Any] | list[Any]) -> None:
         self.payload = payload
 
@@ -157,6 +160,46 @@ def test_greenhouse_connector_fetches_board_and_filters_category() -> None:
     assert jobs[0]["company"] == "medmetric"
     assert jobs[0]["date_posted"] == "2026-07-08"
     assert jobs[0]["category_name"] == "Healthcare Analytics Engineer"
+
+
+def test_greenhouse_connector_logs_each_uncached_board_without_tokens(caplog) -> None:
+    session = FakeSession(
+        [
+            {
+                "jobs": [
+                    {
+                        "id": 123,
+                        "title": "Healthcare Analytics Engineer",
+                        "content": "SQL Python healthcare analytics dashboards.",
+                    }
+                ]
+            },
+            {"jobs": []},
+        ]
+    )
+    connector = GreenhouseConnector(
+        company_tokens=["first-company-secret", "second-company-secret"],
+        session=session,  # type: ignore[arg-type]
+    )
+    category = _category("Healthcare Analytics Engineer")
+    caplog.set_level(logging.INFO, logger="src.connectors.greenhouse_connector")
+
+    first_jobs = connector.fetch_jobs(category)
+    second_jobs = connector.fetch_jobs(category)
+
+    assert second_jobs == first_jobs
+    assert len(session.calls) == 2
+    progress_logs = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "src.connectors.greenhouse_connector"
+        and record.getMessage().startswith("Greenhouse board completed")
+    ]
+    assert len(progress_logs) == 2
+    assert "board=1/2, jobs=1, elapsed_ms=" in progress_logs[0]
+    assert "board=2/2, jobs=0, elapsed_ms=" in progress_logs[1]
+    assert "first-company-secret" not in caplog.text
+    assert "second-company-secret" not in caplog.text
 
 
 def test_lever_connector_fetches_site_and_filters_category() -> None:
