@@ -28,6 +28,7 @@ with company_rollup as (
     from {{ ref('mart_jobs_scored') }}
     where user_uuid = '{{ var("user_uuid") }}'
       and run_uuid = '{{ var("run_uuid") }}'
+      and nullif(trim(company), '') is not null
     group by user_uuid, run_uuid, company
 )
 
