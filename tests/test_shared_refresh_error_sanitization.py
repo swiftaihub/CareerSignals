@@ -5,7 +5,11 @@ import threading
 import time
 
 from src.config.schemas import ConnectorRetryConfig, JobCategoryConfig
-from src.pipelines.shared_connector_refresh import _source_results, collect_connector_jobs
+from src.pipelines.shared_connector_refresh import (
+    _compact_connector_records,
+    _source_results,
+    collect_connector_jobs,
+)
 
 
 SENSITIVE_EXCEPTION_TEXT = (
@@ -41,6 +45,22 @@ class SuccessfulConnector:
 
     def fetch_jobs(self, category: JobCategoryConfig):
         return [{"external_id": "record-1"}]
+
+
+class BulkConnector:
+    source_name = "bulk-source"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def fetch_jobs_for_categories(self, categories: list[JobCategoryConfig]):
+        self.calls += 1
+        return [
+            {
+                "external_id": "record-1",
+                "_careersignal_category": categories[0],
+            }
+        ]
 
 
 def test_connector_exception_text_is_not_logged_or_persisted(caplog) -> None:
@@ -124,3 +144,70 @@ def test_connector_source_logs_start_and_completion_without_changing_results(cap
         "Connector successful-source completed "
         "(records=1, errors=0, elapsed_seconds="
     ) in caplog.text
+
+
+def test_bulk_connector_collects_all_categories_in_one_call() -> None:
+    connector = BulkConnector()
+    categories = [
+        JobCategoryConfig(category_name="Analytics"),
+        JobCategoryConfig(category_name="Data Science"),
+    ]
+
+    records, errors = collect_connector_jobs(
+        [connector],  # type: ignore[list-item]
+        categories,
+    )
+
+    assert connector.calls == 1
+    assert errors == []
+    assert len(records) == 1
+    assert records[0]["_careersignal_category"] == categories[0]
+
+
+def test_compact_connector_records_keeps_first_category_per_source_job() -> None:
+    first_category = JobCategoryConfig(category_name="Analytics")
+    second_category = JobCategoryConfig(category_name="Data")
+    records = [
+        {
+            "source": "greenhouse",
+            "external_id": "job-1",
+            "category_name": "Analytics",
+            "_careersignal_category": first_category,
+            "_careersignal_source": "greenhouse",
+        },
+        {
+            "source": "greenhouse",
+            "external_id": "job-1",
+            "category_name": "Data",
+            "_careersignal_category": second_category,
+            "_careersignal_source": "greenhouse",
+        },
+    ]
+
+    compacted = _compact_connector_records(records)
+
+    assert compacted == [records[0]]
+
+
+def test_compact_connector_records_does_not_trust_external_id_across_boards() -> None:
+    category = JobCategoryConfig(category_name="Analytics")
+    records = [
+        {
+            "source": "greenhouse",
+            "external_id": "123",
+            "title": "Data Analyst",
+            "company": "Company One",
+            "location": "New York",
+            "_careersignal_category": category,
+        },
+        {
+            "source": "greenhouse",
+            "external_id": "123",
+            "title": "Data Analyst",
+            "company": "Company Two",
+            "location": "New York",
+            "_careersignal_category": category,
+        },
+    ]
+
+    assert _compact_connector_records(records) == records

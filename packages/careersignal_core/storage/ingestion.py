@@ -284,6 +284,68 @@ class MotherDuckIngestionWriter:
             )
         return len(rows)
 
+    def load_greenhouse_job_state(
+        self,
+    ) -> dict[tuple[str, str], dict[str, Any]]:
+        """Load token-free Greenhouse detail state for incremental public-board reads."""
+
+        with self.service.connect() as conn:
+            rows = conn.execute(
+                """
+                select board_key, job_post_id, upstream_updated_at,
+                       first_published_at, cast(detail_payload as varchar)
+                from raw.greenhouse_job_state
+                """
+            ).fetchall()
+
+        state: dict[tuple[str, str], dict[str, Any]] = {}
+        for board_key, job_post_id, upstream_updated_at, first_published_at, payload in rows:
+            try:
+                parsed_payload = json.loads(payload) if isinstance(payload, str) else payload
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(parsed_payload, dict):
+                continue
+            state[(str(board_key), str(job_post_id))] = {
+                "upstream_updated_at": clean_text(upstream_updated_at),
+                "first_published_at": clean_text(first_published_at),
+                "detail_payload": parsed_payload,
+            }
+        return state
+
+    def write_greenhouse_job_state(self, records: list[dict[str, Any]]) -> int:
+        """Persist changed Greenhouse details without storing public board tokens."""
+
+        cached_at = _now()
+        rows = [
+            (
+                clean_text(record.get("board_key")),
+                clean_text(record.get("job_post_id")),
+                clean_text(record.get("upstream_updated_at")) or None,
+                clean_text(record.get("first_published_at")) or None,
+                canonical_json(record.get("detail_payload") or {}),
+                cached_at,
+            )
+            for record in records
+            if clean_text(record.get("board_key"))
+            and clean_text(record.get("job_post_id"))
+            and isinstance(record.get("detail_payload"), dict)
+        ]
+        if not rows:
+            return 0
+
+        with self.service.connect() as conn:
+            conn.executemany(
+                """
+                insert or replace into raw.greenhouse_job_state (
+                    board_key, job_post_id, upstream_updated_at,
+                    first_published_at, detail_payload, cached_at
+                ) values (?, ?, ?, ?, cast(? as json), ?)
+                """,
+                rows,
+            )
+        return len(rows)
+
     def write_processed_jobs(
         self,
         run_id: str,

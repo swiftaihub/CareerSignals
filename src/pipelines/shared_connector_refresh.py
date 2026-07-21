@@ -49,6 +49,7 @@ from src.pipelines.shared_processing import (
 )
 from src.processing.deduplicate import deduplicate_jobs
 from src.utils.progress import ProgressReporter
+from src.utils.text_cleaning import clean_text
 
 LOGGER = logging.getLogger(__name__)
 
@@ -293,6 +294,7 @@ def build_connector(
     project_root: Path,
     configs: ConfigBundle,
     global_filters: GlobalFilters | None = None,
+    greenhouse_state: dict[tuple[str, str], dict[str, Any]] | None = None,
 ) -> BaseJobConnector:
     normalized = source_name.casefold().strip()
     filters = global_filters or configs.platform_connector.global_filters
@@ -301,7 +303,10 @@ def build_connector(
     elif normalized in {"serpapi", "serpapi_google_jobs", "google_jobs"}:
         connector = SerpApiConnector(global_filters=filters)
     elif normalized == "greenhouse":
-        connector = GreenhouseConnector(global_filters=filters)
+        connector = GreenhouseConnector(
+            global_filters=filters,
+            state=greenhouse_state,
+        )
     elif normalized == "lever":
         connector = LeverConnector(global_filters=filters)
     elif normalized in {"usajobs", "usa_jobs"}:
@@ -325,8 +330,52 @@ def build_connectors(
     project_root: Path,
     configs: ConfigBundle,
     global_filters: GlobalFilters | None = None,
+    greenhouse_state: dict[tuple[str, str], dict[str, Any]] | None = None,
 ) -> list[BaseJobConnector]:
-    return [build_connector(name, project_root, configs, global_filters) for name in source_names]
+    return [
+        build_connector(
+            name,
+            project_root,
+            configs,
+            global_filters,
+            greenhouse_state,
+        )
+        for name in source_names
+    ]
+
+
+def _compact_connector_records(
+    records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Keep the first category assignment for each normalized job identity."""
+
+    compacted: list[dict[str, Any]] = []
+    seen: set[tuple[str, ...]] = set()
+    for record in records:
+        source = clean_text(
+            record.get("_careersignal_source") or record.get("source") or "unknown"
+        ).casefold()
+        company = clean_text(
+            record.get("company") or record.get("company_name")
+        ).casefold()
+        title = clean_text(record.get("job_title") or record.get("title")).casefold()
+        location = clean_text(
+            record.get("location") or record.get("job_location") or "Unknown"
+        ).casefold()
+        link = clean_text(
+            record.get("jd_post_link")
+            or record.get("url")
+            or ""
+        ).casefold()
+        if link:
+            key = (source, "link", link)
+        else:
+            key = (source, "job", company, title, location, link)
+        if key in seen:
+            continue
+        seen.add(key)
+        compacted.append(record)
+    return compacted
 
 
 def collect_connector_jobs(
@@ -349,6 +398,58 @@ def collect_connector_jobs(
         )
         source_records: list[dict[str, Any]] = []
         source_errors: list[dict[str, Any]] = []
+        bulk_fetcher = getattr(connector, "fetch_jobs_for_categories", None)
+        if callable(bulk_fetcher):
+            fetched_bulk: list[dict[str, Any]] | None = None
+            for attempt in range(1, policy.max_attempts + 1):
+                try:
+                    fetched_bulk = bulk_fetcher(categories)
+                    break
+                except Exception as exc:  # one source must not prevent other sources
+                    if attempt < policy.max_attempts:
+                        LOGGER.warning(
+                            "Connector %s failed for all categories (attempt %s/%s)",
+                            connector.source_name,
+                            attempt,
+                            policy.max_attempts,
+                        )
+                        if policy.backoff_seconds:
+                            time.sleep(policy.backoff_seconds * attempt)
+                        continue
+                    LOGGER.error(
+                        "Connector %s failed for all categories (%s)",
+                        connector.source_name,
+                        type(exc).__name__,
+                    )
+                    source_errors.append(
+                        {
+                            "source": connector.source_name,
+                            "category_name": "All categories",
+                            "query_title": "",
+                            "error_message": "Connector request failed.",
+                            "error_type": type(exc).__name__,
+                        }
+                    )
+            if fetched_bulk is not None:
+                source_records.extend(
+                    {
+                        **record,
+                        "_careersignal_source": connector.source_name,
+                    }
+                    for record in fetched_bulk
+                    if isinstance(record.get("_careersignal_category"), JobCategoryConfig)
+                )
+            elapsed_seconds = time.monotonic() - started_at
+            LOGGER.info(
+                "Connector %s completed "
+                "(records=%s, errors=%s, elapsed_seconds=%.1f)",
+                connector.source_name,
+                len(source_records),
+                len(source_errors),
+                elapsed_seconds,
+            )
+            return source_records, source_errors
+
         for category in categories:
             fetched: list[dict[str, Any]] | None = None
             for attempt in range(1, policy.max_attempts + 1):
@@ -512,6 +613,8 @@ def run_shared_connector_refresh(
         run_uuid = str(uuid4())
     else:
         run_uuid = str(UUID(str(connector_run_uuid)))
+    pipeline_started_at = time.monotonic()
+    phase_seconds: dict[str, float] = {}
 
     mode = data_mode()
     configs = load_configs(root)
@@ -532,17 +635,27 @@ def run_shared_connector_refresh(
         categories=categories,
         user_snapshots=user_snapshots,
     )
-    connectors = build_connectors(source_names, root, configs, acquisition_filters)
     service = MotherDuckService() if _uses_motherduck_analytics(mode) else None
     writer = MotherDuckIngestionWriter(service) if service else None
+    greenhouse_state: dict[tuple[str, str], dict[str, Any]] | None = None
     if writer:
         init_motherduck_schema(service)
         writer.start_run(run_uuid, mode)
+        if hasattr(writer, "load_greenhouse_job_state"):
+            greenhouse_state = writer.load_greenhouse_job_state()
+    connectors = build_connectors(
+        source_names,
+        root,
+        configs,
+        acquisition_filters,
+        greenhouse_state,
+    )
 
     raw_snapshot_path: Path | None = None
     processed_snapshot_path: Path | None = None
     try:
         with ProgressReporter() as progress:
+            phase_started_at = time.monotonic()
             raw_records, connector_errors = collect_connector_jobs(
                 connectors,
                 categories,
@@ -553,9 +666,35 @@ def run_shared_connector_refresh(
                     10,
                 ),
             )
+            phase_seconds["connector_collection"] = time.monotonic() - phase_started_at
 
             fetched_count = len(raw_records)
             fetched_records = list(raw_records)
+            compacted_records = _compact_connector_records(raw_records)
+            duplicate_connector_records = fetched_count - len(compacted_records)
+            LOGGER.info(
+                "Connector records compacted "
+                "(input=%s, unique=%s, duplicates=%s)",
+                fetched_count,
+                len(compacted_records),
+                duplicate_connector_records,
+            )
+            raw_records = compacted_records
+
+            if writer:
+                phase_started_at = time.monotonic()
+                greenhouse_state_updates = [
+                    update
+                    for connector in connectors
+                    for update in getattr(connector, "state_updates", [])
+                ]
+                if hasattr(writer, "write_greenhouse_job_state"):
+                    writer.write_greenhouse_job_state(greenhouse_state_updates)
+                phase_seconds["greenhouse_state_write"] = (
+                    time.monotonic() - phase_started_at
+                )
+
+            phase_started_at = time.monotonic()
             normalized = normalize_shared_jobs(raw_records, progress)
             raw_records, normalized, freshness_stats = apply_shared_freshness_filter(
                 raw_records,
@@ -563,20 +702,27 @@ def run_shared_connector_refresh(
                 configs.platform_connector.freshness_filter,
                 progress,
             )
+            phase_seconds["normalize_and_freshness"] = time.monotonic() - phase_started_at
             if writer:
+                phase_started_at = time.monotonic()
                 writer.write_raw_jobs(run_uuid, raw_records, progress=progress)
                 writer.write_connector_errors(run_uuid, connector_errors)
+                phase_seconds["raw_write"] = time.monotonic() - phase_started_at
 
+            phase_started_at = time.monotonic()
             deduped = deduplicate_jobs(normalized)
             shared_jobs = enrich_shared_jobs(deduped, progress)
+            phase_seconds["deduplicate_and_enrich"] = time.monotonic() - phase_started_at
             source_results = _source_results(
                 connectors, fetched_records, shared_jobs, connector_errors
             )
             if writer:
+                phase_started_at = time.monotonic()
                 if hasattr(writer, "write_shared_jobs"):
                     writer.write_shared_jobs(run_uuid, shared_jobs, progress=progress)
                 else:  # compatibility for older test doubles
                     writer.write_processed_jobs(run_uuid, shared_jobs, progress=progress)
+                phase_seconds["shared_write"] = time.monotonic() - phase_started_at
 
             if _debug_snapshots_enabled(mode):
                 raw_snapshot_path = write_json_snapshot(
@@ -605,14 +751,26 @@ def run_shared_connector_refresh(
         dbt_completed = False
         published_count = 0
         if service and bool_env("CAREERSIGNAL_RUN_DBT", default=True):
-            run_shared_dbt_build(dbt_project_dir(), dbt_profiles_dir())
+            phase_started_at = time.monotonic()
+            run_shared_dbt_build(
+                dbt_project_dir(),
+                dbt_profiles_dir(),
+                connector_run_uuid=run_uuid,
+            )
+            phase_seconds["shared_dbt"] = time.monotonic() - phase_started_at
             dbt_completed = True
             if publisher is not None:
+                phase_started_at = time.monotonic()
                 records = _records_from_frame(
-                    service.query_df("select * from mart.mart_shared_canonical_jobs")
+                    service.query_df(
+                        "select * from mart.mart_shared_canonical_jobs "
+                        "where connector_run_uuid = ?",
+                        [run_uuid],
+                    )
                 )
                 _publish_shared(publisher, records, run_uuid)
                 published_count = len(records)
+                phase_seconds["shared_publication"] = time.monotonic() - phase_started_at
 
         if writer:
             writer.complete_run(
@@ -635,11 +793,21 @@ def run_shared_connector_refresh(
         else:
             status = "completed"
             public_status_message = "Updated successfully."
+        phase_seconds["total"] = time.monotonic() - pipeline_started_at
+        LOGGER.info(
+            "Shared connector refresh phases completed (%s)",
+            ", ".join(
+                f"{name}={elapsed:.1f}s"
+                for name, elapsed in phase_seconds.items()
+            ),
+        )
         return {
             "run_id": run_uuid,
             "connector_run_uuid": run_uuid,
             "data_mode": mode,
             "fetched_raw_jobs": fetched_count,
+            "unique_connector_jobs": len(compacted_records),
+            "duplicate_connector_records": duplicate_connector_records,
             "raw_jobs": len(raw_records),
             "freshness_filtered_out": freshness_stats["input_jobs"] - freshness_stats["kept_jobs"],
             "freshness_stats": freshness_stats,
@@ -652,6 +820,7 @@ def run_shared_connector_refresh(
             "status": status,
             "public_status_message": public_status_message,
             "source_results": source_results,
+            "phase_seconds": phase_seconds,
             "acquisition": acquisition_metadata,
             "excel_exported": False,
             "output_path": None,

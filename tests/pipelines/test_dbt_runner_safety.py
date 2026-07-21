@@ -25,10 +25,23 @@ def _capture(monkeypatch):
 def test_shared_runner_uses_only_fixed_selector(monkeypatch, tmp_path) -> None:
     command = _capture(monkeypatch)
 
-    runner.run_shared_dbt_build(tmp_path / "project", tmp_path / "profiles")
+    runner.run_shared_dbt_build(
+        tmp_path / "project",
+        tmp_path / "profiles",
+        connector_run_uuid=CONNECTOR_RUN_UUID,
+    )
 
     assert command[1:4] == ["build", "--selector", "shared_refresh"]
+    variables = json.loads(command[command.index("--vars") + 1])
+    assert variables == {"connector_run_uuid": CONNECTOR_RUN_UUID}
     assert "--full-refresh" not in command
+
+
+def test_shared_runner_rejects_non_uuid_connector_context(monkeypatch) -> None:
+    _capture(monkeypatch)
+
+    with pytest.raises(ValueError, match="connector_run_uuid"):
+        runner.run_shared_dbt_build(connector_run_uuid="browser-value")
 
 
 def test_user_runner_uses_fixed_selector_and_server_context(monkeypatch, tmp_path) -> None:
