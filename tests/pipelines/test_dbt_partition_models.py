@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import yaml
+
 
 def test_user_models_require_context_and_exact_partition_hook() -> None:
     user_models = []
@@ -44,3 +46,32 @@ def test_shared_models_are_scoped_to_the_current_connector_run() -> None:
         encoding="utf-8"
     )
     assert "connector_run_uuid != '{{ connector_run_uuid }}'" in macro_sql
+
+
+def test_user_shared_relationship_test_is_scoped_to_current_partition() -> None:
+    schema = yaml.safe_load(
+        Path("dbt/models/marts/schema.yml").read_text(encoding="utf-8")
+    )
+    scored_model = next(
+        model for model in schema["models"] if model["name"] == "mart_jobs_scored"
+    )
+    job_id_column = next(
+        column for column in scored_model["columns"] if column["name"] == "job_id"
+    )
+
+    # Historical user/run partitions outlive the current shared connector
+    # snapshot, so a generic full-table relationship test is not a valid
+    # invariant for mart_jobs_scored.
+    assert not any(
+        isinstance(data_test, dict) and "relationships" in data_test
+        for data_test in job_id_column["data_tests"]
+    )
+
+    relationship_test = Path(
+        "dbt/tests/assert_user_result_references_shared_job.sql"
+    ).read_text(encoding="utf-8")
+    assert "require_user_context()" in relationship_test
+    assert "config(tags=['user'])" in relationship_test
+    assert "results.user_uuid = '{{ var(\"user_uuid\") }}'" in relationship_test
+    assert "results.run_uuid = '{{ var(\"run_uuid\") }}'" in relationship_test
+    assert "shared.job_id is null" in relationship_test
