@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 import logging
 import os
+import time
 from typing import Any
 
 import requests
@@ -44,8 +45,13 @@ class GreenhouseConnector(BaseJobConnector):
             return []
 
         matched_jobs: list[dict[str, Any]] = []
-        for token in self.company_tokens:
-            for job in self._fetch_board_jobs(token):
+        board_total = len(self.company_tokens)
+        for board_index, token in enumerate(self.company_tokens, start=1):
+            for job in self._fetch_board_jobs(
+                token,
+                board_index=board_index,
+                board_total=board_total,
+            ):
                 if matches_category(
                     title=str(job.get("title") or ""),
                     description=str(job.get("description") or ""),
@@ -54,10 +60,17 @@ class GreenhouseConnector(BaseJobConnector):
                     matched_jobs.append({**job, "category_name": category_config.category_name})
         return matched_jobs
 
-    def _fetch_board_jobs(self, token: str) -> list[dict[str, Any]]:
+    def _fetch_board_jobs(
+        self,
+        token: str,
+        *,
+        board_index: int,
+        board_total: int,
+    ) -> list[dict[str, Any]]:
         if token in self._cache:
             return self._cache[token]
 
+        started_at = time.monotonic()
         payload = safe_get_json(
             self.session,
             f"{self.base_url}/{token}/jobs",
@@ -67,11 +80,13 @@ class GreenhouseConnector(BaseJobConnector):
         )
         if not isinstance(payload, dict):
             self._cache[token] = []
+            self._log_board_completed(board_index, board_total, 0, started_at)
             return []
 
         jobs = payload.get("jobs", [])
         if not isinstance(jobs, list):
             self._cache[token] = []
+            self._log_board_completed(board_index, board_total, 0, started_at)
             return []
 
         mapped = [
@@ -80,7 +95,24 @@ class GreenhouseConnector(BaseJobConnector):
             if isinstance(result, dict)
         ]
         self._cache[token] = mapped
+        self._log_board_completed(board_index, board_total, len(mapped), started_at)
         return mapped
+
+    @staticmethod
+    def _log_board_completed(
+        board_index: int,
+        board_total: int,
+        jobs: int,
+        started_at: float,
+    ) -> None:
+        elapsed_ms = round((time.monotonic() - started_at) * 1000)
+        LOGGER.info(
+            "Greenhouse board completed (board=%s/%s, jobs=%s, elapsed_ms=%s)",
+            board_index,
+            board_total,
+            jobs,
+            elapsed_ms,
+        )
 
     def _map_result(self, result: dict[str, Any], token: str) -> dict[str, Any]:
         location = result.get("location") if isinstance(result.get("location"), dict) else {}

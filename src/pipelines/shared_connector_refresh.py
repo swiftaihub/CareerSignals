@@ -341,6 +341,12 @@ def collect_connector_jobs(
     def collect_source(
         connector: BaseJobConnector,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        started_at = time.monotonic()
+        LOGGER.info(
+            "Connector %s started (categories=%s)",
+            connector.source_name,
+            len(categories),
+        )
         source_records: list[dict[str, Any]] = []
         source_errors: list[dict[str, Any]] = []
         for category in categories:
@@ -386,6 +392,14 @@ def collect_connector_jobs(
                 }
                 for record in fetched
             )
+        elapsed_seconds = time.monotonic() - started_at
+        LOGGER.info(
+            "Connector %s completed (records=%s, errors=%s, elapsed_seconds=%.1f)",
+            connector.source_name,
+            len(source_records),
+            len(source_errors),
+            elapsed_seconds,
+        )
         return source_records, source_errors
 
     worker_count = min(max(1, max_source_concurrency), len(connectors))
