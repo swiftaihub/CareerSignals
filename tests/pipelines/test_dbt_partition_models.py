@@ -75,3 +75,19 @@ def test_user_shared_relationship_test_is_scoped_to_current_partition() -> None:
     assert "results.user_uuid = '{{ var(\"user_uuid\") }}'" in relationship_test
     assert "results.run_uuid = '{{ var(\"run_uuid\") }}'" in relationship_test
     assert "shared.job_id is null" in relationship_test
+
+
+def test_company_priority_excludes_blank_natural_keys_in_current_partition() -> None:
+    company_model = Path(
+        "dbt/models/marts/mart_company_priority_list.sql"
+    ).read_text(encoding="utf-8")
+    assert "and nullif(trim(company), '') is not null" in company_model
+
+    natural_key_test = Path(
+        "dbt/tests/assert_user_company_priority_has_natural_key.sql"
+    ).read_text(encoding="utf-8")
+    assert "require_user_context()" in natural_key_test
+    assert "config(tags=['user'])" in natural_key_test
+    assert "user_uuid = '{{ var(\"user_uuid\") }}'" in natural_key_test
+    assert "run_uuid = '{{ var(\"run_uuid\") }}'" in natural_key_test
+    assert "nullif(trim(company), '') is null" in natural_key_test
